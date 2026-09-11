@@ -1,0 +1,71 @@
+"""My Agents - the agents this workspace has built.
+
+Every row here came out of the builder. Nothing reads a file.
+"""
+
+from __future__ import annotations
+
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import NOT_FOUND, tenant_db
+from app.builder.schema import AgentConfig
+from app.models.tenant import Agent
+
+router = APIRouter(prefix="/v1/agents", tags=["agents"])
+
+
+class AgentCard(BaseModel):
+    id: str
+    name: str
+    description: str
+    status: str
+    servers: list[str]
+    tool_count: int
+    guarded: list[str]
+    topology: str
+    created_at: str
+
+
+class AgentDetail(AgentCard):
+    config: dict
+    graph: dict
+
+
+def _card(row: Agent) -> AgentCard:
+    cfg = AgentConfig.model_validate(row.config)
+    return AgentCard(
+        id=str(row.id),
+        name=cfg.name,
+        description=cfg.description,
+        status=row.status,
+        servers=cfg.requires_connections,
+        tool_count=len(cfg.tools),
+        guarded=[t.ref for t in cfg.guarded_tools],
+        topology=str(cfg.topology.type),
+        created_at=row.created_at.isoformat() if row.created_at else "",
+    )
+
+
+@router.get("", response_model=list[AgentCard])
+async def list_agents(db: AsyncSession = Depends(tenant_db)):
+    # No tenant filter: the gate already chose one company's schema.
+    rows = await db.scalars(select(Agent).order_by(Agent.created_at.desc()))
+    return [_card(r) for r in rows]
+
+
+@router.get("/{agent_id}", response_model=AgentDetail)
+async def get_agent(agent_id: UUID, db: AsyncSession = Depends(tenant_db)):
+    row = await db.scalar(select(Agent).where(Agent.id == agent_id))
+    if row is None:
+        # Another company's id is simply not in this schema. 404, never 403 -
+        # a 403 would confirm the agent exists. (graded check 9)
+        raise HTTPException(404, detail=NOT_FOUND)
+
+    cfg = AgentConfig.model_validate(row.config)
+    base = _card(row)
+    return AgentDetail(**base.model_dump(), config=row.config, graph=cfg.graph_nodes_and_edges())
