@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import NOT_FOUND, current_user, tenant_db
 from app.core.security import Claims
-from app.registry.catalogue import CATALOGUE
+from app.mcp_registry.catalogue import CATALOGUE
 from app.vault import service
 
 router = APIRouter(prefix="/v1/connections", tags=["connections"])

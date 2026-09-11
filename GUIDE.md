@@ -15,7 +15,7 @@ Read `docs/ARCHITECTURE.md` first (plain language, why each decision), then `doc
 
 | Step | Status | What exists today | Files |
 |---|---|---|---|
-| 1 Register a tool server | ✅ done | Form: name, transport (stdio / http / sse), endpoint, auth type, shared or private. The platform connects out and calls `tools/list` — no tool is typed by hand. Read / write / destructive marking. Health job every 5 min marks dead servers `down`. Sharing with everyone = `platform_admin` only. | `app/api/routers/servers.py` · `app/registry/service.py` · `app/registry/catalogue.py` · `app/registry/health.py` · `app/runtime/mcp_client.py` (transports + `classify_risk`) · `app/models/tenant.py` (`McpServer`, `McpTool`) · `app/models/platform_.py` (`SharedServer`, `SharedTool`) · `web/src/pages/Registry.jsx` |
+| 1 Register a tool server | ✅ done | Form: name, transport (stdio / http / sse), endpoint, auth type, shared or private. The platform connects out and calls `tools/list` — no tool is typed by hand. Read / write / destructive marking. Health job every 5 min marks dead servers `down`. Sharing with everyone = `platform_admin` only. | `app/api/routers/servers.py` · `app/mcp_registry/service.py` · `app/mcp_registry/catalogue.py` · `app/mcp_registry/health.py` · `app/runtime/mcp_client.py` (transports + `classify_risk`) · `app/models/tenant.py` (`McpServer`, `McpTool`) · `app/models/platform_.py` (`SharedServer`, `SharedTool`) · `web/src/pages/Registry.jsx` |
 | 2 Connect to it | ✅ done | AES-256-GCM envelope encryption, per-row data key, AAD = tenant + server. No endpoint returns a secret; the UI shows dots. A test stores a sentinel token and greps every table in every schema for it. | `app/vault/envelope.py` · `app/vault/service.py` · `app/vault/resolver.py` · `app/api/routers/connections.py` · `app/models/tenant.py` (`Connection`) · `web/src/pages/Connections.jsx` |
 | 3 Describe an agent | ✅ except score | Builder graph with two LangGraph interrupts (`select_tools`, `missing_connection`); survives `docker compose restart api`; form mode drives the *same* graph. **No score shown yet.** | `app/builder/schema.py` (`AgentConfig`) · `app/builder/graph.py` · `app/api/routers/builds.py` · `app/tenancy/checkpointers.py` · `web/src/pages/Build.jsx` |
 | 4 Test it | ⚠️ half | Agent page, graph drawn from the stored config, tools + approval table, raw configuration JSON. **No playground, no runs, no scores, no API tab.** | done: `app/api/routers/agents.py` · `app/runtime/compiler.py` · `app/runtime/guarded_tool.py` · `app/runtime/models.py` · `web/src/pages/MyAgents.jsx` · `web/src/pages/AgentDetail.jsx` — pending: `app/api/routers/runs.py`, `app/scoring/`, Playground/Runs tabs in `AgentDetail.jsx` |
@@ -140,10 +140,72 @@ form-vs-chat invariant and the CI check that no query ever schema-qualifies a te
 
 ---
 
-## 2. Walk the product end to end (what a grader will do)
+## 2. Test accounts (shared dev database)
 
-1. **Sign up** at <http://localhost:5173> — company `Northwind Labs`, any email/password.
-   A schema `t_northwind_labs` is created for you at that moment.
+Two companies, so cross-company behaviour can be seen from both sides. Same password everywhere.
+
+| Person | Email | Password | Company | Role | Sees |
+|---|---|---|---|---|---|
+| Shivani | `shivani@northwind.example` | `Passw0rd!` | Northwind Labs (`t_northwind_labs`) | **platform_admin** (first ever signup) | everything + **Admin Review**; can register servers as *Everyone* |
+| Jai | `jai@maven.example` | `Passw0rd!` | Maven (`t_maven`) | admin of Maven | his own workspace + the shared servers |
+
+What is set up right now:
+
+- **Shared with everyone** (registered by Shivani as platform_admin, live in `platform.mcp_servers`):
+  `filesystem` (14 tools), `git` (12), `sqlite` (6). Both companies see them; no credential needed.
+- **Private to Northwind Labs**: `github` — 44 tools discovered from `api.githubcopilot.com` with
+  Shivani's PAT, which is stored encrypted in `t_northwind_labs.connections`. Jai cannot see it.
+- To share `github` too: sign in as Shivani → Registry → click the `github` chip → paste her PAT →
+  Visible to **Everyone** → Connect & save. Jai then sees the card, but it shows **Connect** until he
+  adds *his own* PAT under Connections — credentials are never shared, only the server entry.
+
+If `reset_db.py` has been run, sign up again in this order: Shivani first (she must be the first
+signup to become platform_admin), then Jai with company `Maven`.
+
+---
+
+## 3. Getting a credential for each remote server
+
+The three remote servers refuse an anonymous `tools/list`, so the registry asks for the token
+when you register (or under **Connections** later). Every token is encrypted before it is stored.
+
+### GitHub — personal access token
+
+1. <https://github.com/settings/personal-access-tokens/new> (fine-grained; classic tokens at
+   <https://github.com/settings/tokens/new> also work).
+2. Repository access: the repos you want the agent to reach. Permissions: **Issues**, **Pull
+   requests**, **Contents** — read, or read & write if agents should create/merge.
+3. Generate → copy the `github_pat_…` / `ghp_…` value. Paste it in the registry's Credential field.
+   Sent as `Authorization: Bearer`.
+
+### Slack — user OAuth token (`xoxp-…`)
+
+`mcp.slack.com` accepts **user** tokens only; bot tokens (`xoxb-`) are rejected.
+
+1. <https://api.slack.com/apps> → **Create New App** → *From scratch* → name it, pick your workspace.
+2. Left menu **OAuth & Permissions** → scroll to **Scopes** → under **User Token Scopes** add:
+   `search:read`, `channels:read`, `channels:history`, `groups:read`, `groups:history`,
+   `chat:write`, `users:read`, `users:read.email`.
+3. Scroll up → **Install to Workspace** → Allow.
+4. Copy **User OAuth Token** (`xoxp-…`) from the same page. Paste it in the registry.
+   Reference: <https://docs.slack.dev/ai/slack-mcp-server>
+
+### Jira — Atlassian scoped API token
+
+1. Org admin first: <https://admin.atlassian.com> → **Rovo** → **Rovo MCP server** →
+   **Authentication** → enable *API token authentication*. Without this the endpoint only does
+   OAuth 2.1 (browser flow), which the platform does not implement yet.
+2. Then <https://id.atlassian.com/manage-profile/security/api-tokens> → **Create API token with
+   scopes** → app *Jira* → scopes `read:jira-work`, `write:jira-work`, `read:jira-user` → create →
+   copy it. Paste it in the registry. Sent as `Authorization: Bearer`.
+   Reference: <https://github.com/atlassian/atlassian-mcp-server>
+
+---
+
+## 4. Walk the product end to end (what a grader will do)
+
+1. **Sign in** at <http://localhost:5173> as Shivani or Jai (section 2). A signup creates the
+   company's schema (`t_<company>`) at that moment.
 2. **MCP Registry** → paste an address, or click a quick pick. All six are the vendors' own servers:
    - `filesystem`, `git`, `sqlite` — the reference servers, launched over stdio inside the `api`
      container (`/srv/workspace`, `/srv/var/forge.sqlite`). No credential. Register and they are
@@ -167,7 +229,7 @@ form-vs-chat invariant and the CI check that no query ever schema-qualifies a te
 
 ---
 
-## 3. See the database
+## 5. See the database
 
 ### pgAdmin (browser)
 
@@ -216,7 +278,7 @@ keyed by `mcp_servers.name` and connections by `connections.server_name`.
 
 ---
 
-## 4. Repo map
+## 6. Repo map
 
 ```
 app/
@@ -224,7 +286,7 @@ app/
   builder/    schema.py (AgentConfig - THE document), graph.py (the build graph, two interrupts)
   core/       config.py (.env), db.py (engine, tenant_session), security.py (argon2, JWT)
   models/     platform_.py (shared schema), tenant.py (per-company schema)
-  registry/   catalogue.py (public servers we know), service.py (register/discover/refresh), health.py
+  mcp_registry/ catalogue.py (public servers we know), service.py (register/discover/refresh), health.py
   runtime/    mcp_client.py (real MCP over stdio/http/sse, risk classification), guarded_tool.py
               (the approval gate), compiler.py (config -> LangGraph), models.py (provider fallbacks)
   tenancy/    provision.py (create/drop schema), checkpointers.py (per-tenant AsyncPostgresSaver)
@@ -237,7 +299,7 @@ docker/pgadmin/    pre-registered server + password for pgAdmin
 docs/              ARCHITECTURE.md · DESIGN.md · architecture.drawio
 ```
 
-## 5. House rules
+## 7. House rules
 
 - **An agent is configuration, not code.** Nothing generates Python. `compile_agent()` reads the
   document; if you want new behaviour, add a field and teach the runtime to read it.

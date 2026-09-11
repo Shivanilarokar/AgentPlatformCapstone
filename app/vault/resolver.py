@@ -13,8 +13,8 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 from app.core.db import tenant_session
-from app.registry import service as registry
-from app.registry.catalogue import CATALOGUE
+from app.mcp_registry import service as registry
+from app.mcp_registry.catalogue import CATALOGUE
 from app.runtime.mcp_client import Endpoint
 from app.vault import service
 

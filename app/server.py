@@ -5,7 +5,7 @@ from sqlalchemy import text
 
 from app.api.routers import agents, auth, builds, connections, servers
 from app.core.db import engine
-from app.registry import health as health_sweep
+from app.mcp_registry import health as health_sweep
 from app.tenancy.checkpointers import close_all
 from app.tenancy.provision import bootstrap_platform
 

@@ -19,8 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import NOT_FOUND, current_user, require_admin, tenant_db
 from app.core.security import Claims
-from app.registry import health, service
-from app.registry.catalogue import CATALOGUE
+from app.mcp_registry import health, service
+from app.mcp_registry.catalogue import CATALOGUE
 from app.runtime.mcp_client import AuthRequired
 from app.vault import service as vault
 

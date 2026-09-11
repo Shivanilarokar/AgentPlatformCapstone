@@ -19,8 +19,8 @@ import threading
 import pytest
 
 from app.core.db import platform_session, tenant_session
-from app.registry import service
-from app.registry.catalogue import spec
+from app.mcp_registry import service
+from app.mcp_registry.catalogue import spec
 from app.runtime.mcp_client import Endpoint
 from app.tenancy.provision import create_tenant, drop_tenant, bootstrap_platform
 
@@ -193,7 +193,7 @@ async def test_refresh_marks_a_dead_server_down_and_a_live_one_ok(two_workspaces
 
 
 async def test_the_sweep_visits_every_workspace(two_workspaces, filesystem):
-    from app.registry import health
+    from app.mcp_registry import health
 
     async with tenant_session(A) as s:
         await service.register(s, name="filesystem", transport="stdio", endpoint=filesystem)

@@ -26,7 +26,7 @@ from sqlalchemy import select, text
 from app.core.db import engine, platform_session, tenant_session
 from app.models.platform_ import SharedServer
 from app.models.tenant import McpServer
-from app.registry import service
+from app.mcp_registry import service
 from app.vault import service as vault
 
 log = logging.getLogger(__name__)
