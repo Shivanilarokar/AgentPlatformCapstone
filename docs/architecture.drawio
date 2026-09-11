@@ -1,0 +1,418 @@
+<mxfile host="Electron" pages="5">
+  <diagram name="1 · System Overview" id="page-overview">
+    <mxGraphModel dx="392" dy="291" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="826" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="ov-title" value="Agent Platform — System Overview" style="text;html=1;fontSize=22;fontStyle=1;align=left;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="120" y="10" width="600" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-sub" value="Only two of these boxes are real programs: the Builder graph and the Runtime compiler. Everything else is forms, CRUD and a database." style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="120" y="38" width="900" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-browser" value="&lt;b&gt;Browser — React + Vite SPA&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:11px;color:#555555&quot;&gt;Build · My Agents · Registry · Connections&lt;br&gt;Marketplace · Admin Review&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="420" y="80" width="330" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-e1" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeWidth=2;endArrow=block;" parent="1" source="ov-browser" target="ov-api" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-e1-lbl" value="every request carries a Bearer JWT&#xa;{ user_id, tenant_id, role }" style="edgeLabel;html=1;fontSize=10;fontColor=#B85450;labelBackgroundColor=#FFFFFF;" parent="ov-e1" vertex="1" connectable="0">
+          <mxGeometry x="0.1" relative="1" as="geometry">
+            <mxPoint x="90" y="-4" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ov-api" value="&lt;b&gt;FastAPI&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:11px;color:#555555&quot;&gt;auth · registry · connections · builds · agents · runs · approvals · submissions · listings · public /v1 API&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="120" y="190" width="930" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-gate" value="&lt;b&gt;Tenant dependency&lt;/b&gt; — opens a transaction and runs&#xa;&lt;br&gt;&lt;font face=&quot;Courier New&quot;&gt;SET LOCAL search_path = t_&amp;lt;tenant&amp;gt;, platform&lt;/font&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;after this line, no handler ever writes WHERE tenant_id&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;verticalAlign=middle;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="120" y="275" width="930" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-registry" value="&lt;b&gt;Registry service&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#555555&quot;&gt;connects to an MCP server,&lt;br&gt;calls tools/list,&lt;br&gt;marks each tool&lt;br&gt;read / write / destructive&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=top;spacingTop=6;" parent="1" vertex="1">
+          <mxGeometry x="120" y="360" width="210" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-vault" value="&lt;b&gt;Vault&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#555555&quot;&gt;AES-256-GCM envelope&lt;br&gt;encryption, AAD bound to&lt;br&gt;tenant + server.&lt;br&gt;&lt;b&gt;The only place a&lt;br&gt;plaintext token exists.&lt;/b&gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;verticalAlign=top;spacingTop=6;" parent="1" vertex="1">
+          <mxGeometry x="360" y="360" width="210" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-builder" value="&lt;b&gt;Builder graph&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#555555&quot;&gt;plain English in,&lt;br&gt;&lt;b&gt;config document&lt;/b&gt; out.&lt;br&gt;Two LangGraph interrupts.&lt;br&gt;Survives a restart.&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=top;spacingTop=6;" parent="1" vertex="1">
+          <mxGeometry x="600" y="360" width="210" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-runtime" value="&lt;b&gt;Runtime compiler&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#555555&quot;&gt;config document in,&lt;br&gt;live LangGraph out.&lt;br&gt;&lt;b&gt;The only code that&lt;br&gt;ever runs an agent.&lt;/b&gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=top;spacingTop=6;" parent="1" vertex="1">
+          <mxGeometry x="840" y="360" width="210" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-e2" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" parent="1" source="ov-gate" target="ov-registry" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-e3" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" parent="1" source="ov-gate" target="ov-vault" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-e4" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" parent="1" source="ov-gate" target="ov-builder" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-e5" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" parent="1" source="ov-gate" target="ov-runtime" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-pg" value="&lt;b&gt;PostgreSQL 16&lt;/b&gt; — one database" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;verticalAlign=top;spacingTop=8;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="120" y="530" width="930" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-pg-platform" value="&lt;b&gt;schema: platform&lt;/b&gt; (shared)&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;tenants · users · api_tokens&lt;br&gt;mcp_servers + mcp_tools (global)&lt;br&gt;&lt;b&gt;listings&lt;/b&gt; — the marketplace&lt;br&gt;submission_index (admin routing)&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;verticalAlign=top;spacingTop=6;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="150" y="570" width="420" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-pg-tenant" value="&lt;b&gt;schema: t_&amp;lt;tenant&amp;gt;&lt;/b&gt; — one per company&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;agents · agent_checks · connections&lt;br&gt;runs · approvals · submissions&lt;br&gt;mcp_servers + mcp_tools (private)&lt;br&gt;&lt;b&gt;LangGraph checkpoints&lt;/b&gt;&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;verticalAlign=top;spacingTop=6;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="600" y="570" width="420" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-e6" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;" parent="1" source="ov-vault" target="ov-pg" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-e7" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;" parent="1" source="ov-builder" target="ov-pg" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-mcp" value="&lt;b&gt;MCP servers&lt;/b&gt; (all free, all real)&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#555555&quot;&gt;filesystem · git · sqlite (stdio) · GitHub (free PAT) · local_slack (ours, HTTP, has a real write tool)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=middle;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="120" y="740" width="490" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-e8" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;dashed=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;" parent="1" source="ov-registry" target="ov-mcp" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-e8-lbl" value="tools/list" style="edgeLabel;html=1;fontSize=10;labelBackgroundColor=#FFFFFF;" parent="ov-e8" vertex="1" connectable="0">
+          <mxGeometry x="-0.1" relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-e9" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;dashed=1;" parent="1" source="ov-runtime" target="ov-mcp" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="945" y="820" />
+              <mxPoint x="610" y="820" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ov-e9-lbl" value="tools/call, with a token borrowed from the Vault for one call" style="edgeLabel;html=1;fontSize=10;labelBackgroundColor=#FFFFFF;" parent="ov-e9" vertex="1" connectable="0">
+          <mxGeometry x="0.2" relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ov-note" value="&lt;b&gt;Data flows one way&lt;/b&gt;&#xa;&lt;br&gt;&lt;br&gt;SPA → FastAPI → Registry / Builder → Postgres&#xa;&lt;br&gt;&#xa;&lt;br&gt;The Runtime reads a stored config and&#xa;&lt;br&gt;assembles a graph. It never generates code.&#xa;&lt;br&gt;&#xa;&lt;br&gt;&lt;b&gt;Rule 1:&lt;/b&gt; an agent is configuration,&#xa;&lt;br&gt;not Python we wrote at build time." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;verticalAlign=top;spacing=8;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="650" y="740" width="400" height="70" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="2 · Tenant Isolation" id="page-tenancy">
+    <mxGraphModel dx="1500" dy="1486" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="826" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="tn-title" parent="1" style="text;html=1;fontSize=22;fontStyle=1;align=left;" value="Tenant Isolation — schema per company" vertex="1">
+          <mxGeometry height="30" width="700" x="210" y="-50" as="geometry" />
+        </mxCell>
+        <mxCell id="tn-sub" parent="1" style="text;html=1;fontSize=12;fontColor=#B85450;align=left;" value="Graded check 1: they DELETE our application filter and try again. Check 9: another company&#39;s agent id must return 404, not 403." vertex="1">
+          <mxGeometry height="20" width="1000" x="80" y="38" as="geometry" />
+        </mxCell>
+        <mxCell id="tn-req1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" value="Request from&#xa;&lt;br&gt;&lt;b&gt;priya @ Northwind&lt;/b&gt;" vertex="1">
+          <mxGeometry height="60" width="150" x="80" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="tn-req2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" value="Request from&#xa;&lt;br&gt;&lt;b&gt;tom @ Helios&lt;/b&gt;" vertex="1">
+          <mxGeometry height="60" width="150" x="80" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="tn-dep" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;align=left;verticalAlign=top;spacing=8;fontSize=11;" value="&lt;b&gt;One FastAPI dependency&lt;/b&gt;&#xa;&lt;br&gt;&lt;br&gt;1. open a transaction&#xa;&lt;br&gt;2. read tenant_id from the JWT&#xa;&lt;br&gt;3. &lt;font face=&quot;Courier New&quot;&gt;SET LOCAL search_path = t_&amp;lt;id&amp;gt;, platform&lt;/font&gt;&#xa;&lt;br&gt;4. yield the session&#xa;&lt;br&gt;5. commit&#xa;&lt;br&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#B85450&quot;&gt;SET LOCAL only lives inside a transaction — never a bare pool checkout.&lt;/font&gt;" vertex="1">
+          <mxGeometry height="180" width="330" x="290" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="tn-e1" edge="1" parent="1" source="tn-req1" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" target="tn-dep">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="tn-e2" edge="1" parent="1" source="tn-req2" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" target="tn-dep">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="tn-query" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;align=left;verticalAlign=top;spacing=8;fontSize=11;dashed=1;" value="&lt;b&gt;Every handler then writes:&lt;/b&gt;&#xa;&lt;br&gt;&lt;br&gt;&lt;font face=&quot;Courier New&quot; style=&quot;font-size:13px&quot;&gt;SELECT * FROM agents&lt;/font&gt;&#xa;&lt;br&gt;&#xa;&lt;br&gt;&lt;font style=&quot;color:#B85450&quot;&gt;&lt;b&gt;No WHERE tenant_id. Anywhere.&lt;/b&gt;&lt;/font&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;There is no filter to delete, so deleting it&lt;br&gt;changes nothing. That is what passes check 1.&lt;/font&gt;" vertex="1">
+          <mxGeometry height="180" width="400" x="680" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="tn-e3" edge="1" parent="1" source="tn-dep" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;" target="tn-query">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="tn-pg" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;verticalAlign=top;spacingTop=8;fontSize=14;" value="&lt;b&gt;One PostgreSQL database&lt;/b&gt;" vertex="1">
+          <mxGeometry height="290" width="1000" x="80" y="320" as="geometry" />
+        </mxCell>
+        <mxCell id="tn-s1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;verticalAlign=top;spacingTop=6;fontSize=11;" value="&lt;b&gt;t_northwind&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;agents&lt;br&gt;connections&lt;br&gt;runs · approvals&lt;br&gt;submissions&lt;br&gt;&lt;b&gt;checkpoints&lt;/b&gt;&lt;/font&gt;" vertex="1">
+          <mxGeometry height="140" width="180" x="110" y="370" as="geometry" />
+        </mxCell>
+        <mxCell id="tn-s2" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;verticalAlign=top;spacingTop=6;fontSize=11;" value="&lt;b&gt;t_helios&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;agents&lt;br&gt;connections&lt;br&gt;runs · approvals&lt;br&gt;submissions&lt;br&gt;&lt;b&gt;checkpoints&lt;/b&gt;&lt;/font&gt;" vertex="1">
+          <mxGeometry height="140" width="180" x="320" y="370" as="geometry" />
+        </mxCell>
+        <mxCell id="tn-s3" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;verticalAlign=top;spacingTop=6;fontSize=11;" value="&lt;b&gt;t_bluepeak&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;… same tables …&lt;/font&gt;" vertex="1">
+          <mxGeometry height="140" width="180" x="530" y="370" as="geometry" />
+        </mxCell>
+        <mxCell id="tn-sp" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=top;spacingTop=6;fontSize=11;" value="&lt;b&gt;platform&lt;/b&gt; (shared, on purpose)&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;tenants · users · api_tokens&lt;br&gt;mcp_servers (global)&lt;br&gt;&lt;b&gt;listings&lt;/b&gt; — the marketplace&lt;br&gt;submission_index&lt;/font&gt;" vertex="1">
+          <mxGeometry height="140" width="300" x="750" y="370" as="geometry" />
+        </mxCell>
+        <mxCell id="tn-e4" edge="1" parent="1" source="tn-query" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;strokeColor=#82B366;" target="tn-s1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="tn-e4l" connectable="0" parent="tn-e4" style="edgeLabel;html=1;fontSize=10;labelBackgroundColor=#FFFFFF;fontColor=#82B366;" value="priya&#39;s search_path resolves &#39;agents&#39; here" vertex="1">
+          <mxGeometry relative="1" x="0.2" as="geometry" />
+        </mxCell>
+        <mxCell id="tn-x" parent="1" style="text;html=1;fontSize=34;fontColor=#B85450;align=center;fontStyle=1" value="✕" vertex="1">
+          <mxGeometry height="40" width="60" x="380" y="520" as="geometry" />
+        </mxCell>
+        <mxCell id="tn-xl" parent="1" style="text;html=1;fontSize=10;fontColor=#B85450;align=left;" value="priya can never name t_helios — a CI grep fails the build if any query schema-qualifies a tenant table" vertex="1">
+          <mxGeometry height="20" width="600" x="440" y="528" as="geometry" />
+        </mxCell>
+        <mxCell id="tn-404" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;verticalAlign=top;spacing=8;fontSize=11;" value="&lt;b&gt;Check 9 falls out for free&lt;/b&gt;&#xa;&lt;br&gt;&#xa;&lt;br&gt;Tom asks for Priya&#39;s agent id.&#xa;&lt;br&gt;It is simply not in &lt;font face=&quot;Courier New&quot;&gt;t_helios&lt;/font&gt;.&#xa;&lt;br&gt;The query returns zero rows, so the handler is:&#xa;&lt;br&gt;&#xa;&lt;br&gt;&lt;font face=&quot;Courier New&quot;&gt;if not agent: raise HTTPException(404)&lt;/font&gt;&#xa;&lt;br&gt;&#xa;&lt;br&gt;There is no ownership branch, so there is no way&#xa;&lt;br&gt;to accidentally return 403. A 403 would confirm&#xa;&lt;br&gt;the agent exists." vertex="1">
+          <mxGeometry height="160" width="480" x="80" y="640" as="geometry" />
+        </mxCell>
+        <mxCell id="tn-why" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;verticalAlign=top;spacing=8;fontSize=11;" value="&lt;b&gt;Why schema-per-tenant beats row-level security here&lt;/b&gt;&#xa;&lt;br&gt;&#xa;&lt;br&gt;LangGraph checkpoint tables are keyed by &lt;font face=&quot;Courier New&quot;&gt;thread_id&lt;/font&gt; ONLY.&#xa;&lt;br&gt;They carry no tenant_id, so an RLS policy has nothing to filter on —&#xa;&lt;br&gt;a guessed thread id would read another company&#39;s paused graph state.&#xa;&lt;br&gt;&#xa;&lt;br&gt;Here each company&#39;s checkpoints live inside its own schema and are&#xa;&lt;br&gt;unreachable from another search_path. The hole closes by itself.&#xa;&lt;br&gt;&#xa;&lt;br&gt;&lt;font style=&quot;color:#B85450&quot;&gt;&lt;b&gt;The price:&lt;/b&gt; migrations must run across every schema, and each tenant&#xa;&lt;br&gt;needs its own checkpointer connection pool. Both are built on day 2–3.&lt;/font&gt;" vertex="1">
+          <mxGeometry height="160" width="490" x="590" y="640" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="3 · Builder Graph (2 interrupts)" id="page-builder">
+    <mxGraphModel dx="1250" dy="550" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="826" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="bg-title" parent="1" style="text;html=1;fontSize=22;fontStyle=1;align=left;" value="The Builder Graph — plain English in, a config document out" vertex="1">
+          <mxGeometry height="30" width="900" x="60" y="10" as="geometry" />
+        </mxCell>
+        <mxCell id="bg-sub" parent="1" style="text;html=1;fontSize=12;fontColor=#B85450;align=left;" value="The two pauses are the centre of the project. Graded check 5: kill the server mid-build and it must resume exactly here." vertex="1">
+          <mxGeometry height="20" width="1000" x="60" y="38" as="geometry" />
+        </mxCell>
+        <mxCell id="bg-in" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" value="&quot;I want an agent that reads my open&#xa;&lt;br&gt;GitHub issues every morning and&#xa;&lt;br&gt;posts a summary to Slack.&quot;" vertex="1">
+          <mxGeometry height="70" width="240" x="60" y="95" as="geometry" />
+        </mxCell>
+        <mxCell id="bg-n1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" value="&lt;b&gt;1 · understand&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;work out what it should do&lt;/font&gt;" vertex="1">
+          <mxGeometry height="60" width="200" x="360" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="bg-n2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" value="&lt;b&gt;2 · search_registry&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;match the need against mcp_tools&lt;br&gt;(global + this company&#39;s private)&lt;/font&gt;" vertex="1">
+          <mxGeometry height="60" width="220" x="620" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="bg-i1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;verticalAlign=middle;" value="&lt;b&gt;⏸ INTERRUPT 1 — select_tools&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;&quot;These servers cover it — which should it use?&quot;&lt;br&gt;github ✓ connected · slack ✕ not connected · jira ☐&lt;br&gt;&lt;b&gt;The build stops here until the user answers.&lt;/b&gt;&lt;/font&gt;" vertex="1">
+          <mxGeometry height="80" width="440" x="620" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="bg-n3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" value="&lt;b&gt;3 · check_connections&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;for each required server slug,&lt;br&gt;is there an active connection?&lt;/font&gt;" vertex="1">
+          <mxGeometry height="60" width="220" x="620" y="320" as="geometry" />
+        </mxCell>
+        <mxCell id="bg-i2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" value="&lt;b&gt;⏸ INTERRUPT 2 — missing_connection&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;github ✓ ok · slack ✕ missing&lt;br&gt;&quot;Connect Slack&quot; or &quot;Skip — build without posting&quot;&lt;br&gt;&lt;b&gt;Only fires when something is actually missing.&lt;/b&gt;&lt;/font&gt;" vertex="1">
+          <mxGeometry height="80" width="440" x="620" y="410" as="geometry" />
+        </mxCell>
+        <mxCell id="bg-n4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" value="&lt;b&gt;4 · assemble_config&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;write the config document.&lt;br&gt;&lt;b&gt;Force approval=ask on every&lt;br&gt;write / destructive tool.&lt;/b&gt;&lt;/font&gt;" vertex="1">
+          <mxGeometry height="70" width="220" x="620" y="530" as="geometry" />
+        </mxCell>
+        <mxCell id="bg-n5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" value="&lt;b&gt;5 · score&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;deterministic rubric,&lt;br&gt;one row per check&lt;/font&gt;" vertex="1">
+          <mxGeometry height="70" width="200" x="360" y="530" as="geometry" />
+        </mxCell>
+        <mxCell id="bg-n6" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="&lt;b&gt;6 · persist&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;insert into agents&lt;br&gt;(inside t_&amp;lt;tenant&amp;gt;)&lt;/font&gt;" vertex="1">
+          <mxGeometry height="70" width="200" x="90" y="532" as="geometry" />
+        </mxCell>
+        <mxCell id="bge1" edge="1" parent="1" source="bg-in" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" target="bg-n1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="bge2" edge="1" parent="1" source="bg-n1" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" target="bg-n2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="bge3" edge="1" parent="1" source="bg-n2" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;strokeColor=#D79B00;" target="bg-i1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="bge4" edge="1" parent="1" source="bg-i1" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;strokeColor=#D79B00;" target="bg-n3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="bge4l" connectable="0" parent="bge4" style="edgeLabel;html=1;fontSize=10;labelBackgroundColor=#FFFFFF;" value="Command(resume=chosen refs)" vertex="1">
+          <mxGeometry relative="1" x="0.1" as="geometry" />
+        </mxCell>
+        <mxCell id="bge5" edge="1" parent="1" source="bg-n3" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;strokeColor=#D79B00;" target="bg-i2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="bge6" edge="1" parent="1" source="bg-i2" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;strokeColor=#D79B00;" target="bg-n4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="bge7" edge="1" parent="1" source="bg-n4" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" target="bg-n5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="bge8" edge="1" parent="1" source="bg-n5" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" target="bg-n6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="bg-ckpt" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;verticalAlign=middle;" value="&lt;b&gt;AsyncPostgresSaver&lt;/b&gt; — checkpoints, in t_&amp;lt;tenant&amp;gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;After every node, the whole graph state is written to Postgres against a thread_id.&lt;br&gt;Close the tab · kill the container · come back tomorrow → the thread resumes at the same node.&lt;/font&gt;" vertex="1">
+          <mxGeometry height="70" width="620" x="90" y="660" as="geometry" />
+        </mxCell>
+        <mxCell id="bge9" edge="1" parent="1" source="bg-i1" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;dashed=1;strokeColor=#82B366;" target="bg-ckpt">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="bge10" edge="1" parent="1" source="bg-i2" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;dashed=1;strokeColor=#82B366;" target="bg-ckpt">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="bg-form" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;verticalAlign=top;spacing=8;fontSize=11;" value="&lt;b&gt;&quot;Use a form instead&quot;&lt;/b&gt;&#xa;&lt;br&gt;&#xa;&lt;br&gt;The form does NOT get its own code path.&#xa;&lt;br&gt;It invokes this same graph with the answers&#xa;&lt;br&gt;pre-seeded, so both interrupts resolve at once.&#xa;&lt;br&gt;&#xa;&lt;br&gt;&lt;font style=&quot;color:#B85450&quot;&gt;&quot;Both paths must produce the same agent&#xa;&lt;br&gt;configuration — do not write the builder twice.&quot;&lt;/font&gt;" vertex="1">
+          <mxGeometry height="140" width="330" x="740" y="640" as="geometry" />
+        </mxCell>
+        <mxCell id="bg-i1n" parent="1" style="text;html=1;fontSize=10;fontColor=#D79B00;fontStyle=1;align=left;" value="interrupt()" vertex="1">
+          <mxGeometry height="20" width="80" x="1065" y="230" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="4 · Runtime + Approval Gate" id="page-runtime">
+    <mxGraphModel dx="632" dy="481" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="826" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="rt-title" value="The Runtime — one compiler, one guarded tool wrapper" style="text;html=1;fontSize=22;fontStyle=1;align=left;" parent="1" vertex="1">
+          <mxGeometry x="60" y="10" width="900" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-sub" value="Graded check 7: the multi-agent demo runs end to end in the playground, including its approval step. Rule 4: the platform enforces approval, not the prompt." style="text;html=1;fontSize=12;fontColor=#B85450;align=left;" parent="1" vertex="1">
+          <mxGeometry x="60" y="38" width="1050" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-cfg" value="&lt;b&gt;agents.config&lt;/b&gt; (JSONB)&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;topology · tools · risk&lt;br&gt;requires_connection: &quot;slack&quot;&lt;/font&gt;" style="shape=cylinder3;boundedLbl=1;backgroundOutline=1;html=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;verticalAlign=top;spacingTop=6;" parent="1" vertex="1">
+          <mxGeometry x="60" y="100" width="180" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-comp" value="&lt;b&gt;compile_agent(config)&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;cached by config hash.&lt;br&gt;The playground AND the public&lt;br&gt;/v1 API both call this — there is&lt;br&gt;no second way to run an agent.&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="300" y="100" width="230" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="rte1" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;" parent="1" source="rt-cfg" target="rt-comp" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-graph" value="&lt;b&gt;Compiled graph — supervisor topology&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9673A6;dashed=1;verticalAlign=top;spacingTop=6;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="590" y="80" width="500" height="290" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-msg" value="message" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="615" y="200" width="80" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-sup" value="&lt;b&gt;supervisor&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;routes the work&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="730" y="195" width="110" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-tri" value="&lt;b&gt;triager&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;github: 2 read tools&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="900" y="120" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-rep" value="&lt;b&gt;reporter&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;local_slack: post_message&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="900" y="280" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="rte2" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" parent="1" source="rt-msg" target="rt-sup" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="rte3" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" parent="1" source="rt-sup" target="rt-tri" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="rte4" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" parent="1" source="rt-sup" target="rt-rep" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="rte5" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;dashed=1;" parent="1" source="rt-tri" target="rt-rep" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="rte5l" value="hands off" style="edgeLabel;html=1;fontSize=9;labelBackgroundColor=#FFFFFF;" parent="rte5" vertex="1" connectable="0">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="rte6" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;" parent="1" source="rt-comp" target="rt-msg" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-wrap" value="&lt;b&gt;EVERY tool call passes through guarded_tool()&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;verticalAlign=top;spacingTop=8;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="60" y="410" width="1030" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-w1" value="&lt;b&gt;1 · risk check&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;read → straight through.&lt;br&gt;&lt;br&gt;write / destructive →&lt;br&gt;&lt;b&gt;interrupt()&lt;/b&gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontSize=11;verticalAlign=top;spacingTop=6;" parent="1" vertex="1">
+          <mxGeometry x="90" y="460" width="180" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-w2" value="&lt;b&gt;2 · human answers&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;Approve &amp;amp; post / Reject,&lt;br&gt;shown in the chat.&lt;br&gt;&lt;br&gt;Reject returns a string&lt;br&gt;to the model — nothing runs.&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;verticalAlign=top;spacingTop=6;" parent="1" vertex="1">
+          <mxGeometry x="310" y="460" width="180" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-w3" value="&lt;b&gt;3 · borrow the token&lt;/b&gt;&#xa;&lt;br&gt;&lt;font face=&quot;Courier New&quot; style=&quot;font-size:9px&quot;&gt;token = vault.use(&lt;br&gt;&amp;nbsp; tenant, &quot;slack&quot;)&lt;/font&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;decrypt · use · drop,&lt;br&gt;inside one function&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontSize=11;verticalAlign=top;spacingTop=6;" parent="1" vertex="1">
+          <mxGeometry x="530" y="460" width="180" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-w4" value="&lt;b&gt;4 · call the MCP tool&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;then &lt;font face=&quot;Courier New&quot;&gt;del token&lt;/font&gt;&lt;br&gt;&lt;br&gt;Connection missing?&lt;br&gt;Return an error STRING.&lt;br&gt;&lt;b&gt;Degraded, not crashed.&lt;/b&gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontSize=11;verticalAlign=top;spacingTop=6;" parent="1" vertex="1">
+          <mxGeometry x="750" y="460" width="180" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="rte7" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" parent="1" source="rt-w1" target="rt-w2" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="rte8" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" parent="1" source="rt-w2" target="rt-w3" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="rte9" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" parent="1" source="rt-w3" target="rt-w4" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-key" value="&lt;b&gt;Say this out loud in the presentation:&lt;/b&gt;&#xa;&lt;br&gt;&lt;br&gt;The approval is enforced by this wrapper, not by text in the agent&#39;s&#xa;&lt;br&gt;instructions. Putting &quot;always ask before posting&quot; in a prompt is a&#xa;&lt;br&gt;&lt;b&gt;suggestion&lt;/b&gt;, and models do not always follow suggestions.&#xa;&lt;br&gt;This is a &lt;b&gt;control&lt;/b&gt;: the tool physically cannot execute first." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;verticalAlign=top;spacing=8;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="60" y="690" width="530" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-key2" value="&lt;b&gt;Why a token can never leak (check 2)&lt;/b&gt;&#xa;&lt;br&gt;&lt;br&gt;The checkpointer writes graph state to Postgres so a run can resume.&#xa;&lt;br&gt;So a token that ever lands in graph state is permanently on disk.&#xa;&lt;br&gt;&#xa;&lt;br&gt;Therefore state carries &lt;b&gt;a server slug&lt;/b&gt;, never a value. The token exists&#xa;&lt;br&gt;only between step 3 and step 4 above, inside one function frame." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;align=left;verticalAlign=top;spacing=8;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="620" y="690" width="470" height="110" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="5 · Six-Step Flow &amp; Publishing" id="page-flow">
+    <mxGraphModel dx="2000" dy="880" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="826" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="fl-title" parent="1" style="text;html=1;fontSize=22;fontStyle=1;align=left;" value="The six-step flow — and the only place data crosses companies" vertex="1">
+          <mxGeometry height="30" width="900" x="60" y="10" as="geometry" />
+        </mxCell>
+        <mxCell id="fl-sub" parent="1" style="text;html=1;fontSize=12;fontColor=#B85450;align=left;" value="The demo walks this path without cuts. Graded checks 3, 4 and 6 all live in the publish half." vertex="1">
+          <mxGeometry height="20" width="1000" x="60" y="38" as="geometry" />
+        </mxCell>
+        <mxCell id="fl-lane1" parent="1" style="swimlane;html=1;startSize=46;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;horizontal=1;" value="Company A — Northwind Labs&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;schema t_northwind&lt;/font&gt;" vertex="1">
+          <mxGeometry height="290" width="1030" x="60" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="fl-1" parent="fl-lane1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;verticalAlign=top;spacingTop=6;" value="&lt;b&gt;1 · Register&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;paste an MCP server&lt;br&gt;address. Platform&lt;br&gt;connects and asks it&lt;br&gt;&lt;b&gt;what tools it has.&lt;/b&gt;&lt;br&gt;Each marked read /&lt;br&gt;write / destructive.&lt;/font&gt;" vertex="1">
+          <mxGeometry height="130" width="150" x="20" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="fl-2" parent="fl-lane1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;verticalAlign=top;spacingTop=6;" value="&lt;b&gt;2 · Connect&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;paste a token once.&lt;br&gt;Encrypted on the way&lt;br&gt;in. Never comes back&lt;br&gt;out — not to the user,&lt;br&gt;an agent, or a log.&lt;/font&gt;" vertex="1">
+          <mxGeometry height="130" width="150" x="190" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="fl-3" parent="fl-lane1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;verticalAlign=top;spacingTop=6;" value="&lt;b&gt;3 · Describe&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;chat → builder graph.&lt;br&gt;&lt;b&gt;Pauses twice&lt;/b&gt; (pick&lt;br&gt;tools, add missing&lt;br&gt;credential), then&lt;br&gt;writes the config&lt;br&gt;and deploys.&lt;/font&gt;" vertex="1">
+          <mxGeometry height="130" width="150" x="360" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="fl-4" parent="fl-lane1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;verticalAlign=top;spacingTop=6;" value="&lt;b&gt;4 · Test&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;playground chat.&lt;br&gt;Risky tool → run&lt;br&gt;&lt;b&gt;pauses&lt;/b&gt; and shows&lt;br&gt;Approve / Reject&lt;br&gt;in the chat.&lt;br&gt;Runs feed the score.&lt;/font&gt;" vertex="1">
+          <mxGeometry height="130" width="150" x="530" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="fl-5" parent="fl-lane1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;verticalAlign=top;spacingTop=6;" value="&lt;b&gt;5 · Publish&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;&lt;b&gt;Gate:&lt;/b&gt; score ≥ 70&lt;br&gt;AND grade ≥ B.&lt;br&gt;Below that the button&lt;br&gt;is disabled and says&lt;br&gt;which check failed.&lt;br&gt;&lt;font color=&quot;#B85450&quot;&gt;(check 3)&lt;/font&gt;&lt;/font&gt;" vertex="1">
+          <mxGeometry height="130" width="150" x="700" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="fl-san" parent="fl-lane1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;verticalAlign=top;spacingTop=6;" value="&lt;b&gt;sanitize&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;&lt;b&gt;Allowlist projection&lt;/b&gt;&lt;br&gt;— copy ONLY named&lt;br&gt;fields into the listing.&lt;br&gt;Planted material in&lt;br&gt;any field we did not&lt;br&gt;name cannot escape.&lt;br&gt;&lt;font color=&quot;#B85450&quot;&gt;(check 4)&lt;/font&gt;&lt;/font&gt;" vertex="1">
+          <mxGeometry height="130" width="150" x="870" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="fle1" edge="1" parent="fl-lane1" source="fl-1" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" target="fl-2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fle2" edge="1" parent="fl-lane1" source="fl-2" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" target="fl-3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fle3" edge="1" parent="fl-lane1" source="fl-3" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" target="fl-4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fle4" edge="1" parent="fl-lane1" source="fl-4" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" target="fl-5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fle5" edge="1" parent="fl-lane1" source="fl-5" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" target="fl-san">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fl-adm" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;verticalAlign=middle;" value="&lt;b&gt;⏸ ADMIN REVIEW — the publish graph parks here&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;A queue only admins can open. Approve · Request changes · Reject — all three resume the SAME parked run.&lt;br&gt;&lt;b&gt;It may wait three days, across two deploys and a weekend&lt;/b&gt; — it is a LangGraph interrupt on the Postgres checkpointer. &lt;font color=&quot;#B85450&quot;&gt;(check 6)&lt;/font&gt;&lt;br&gt;The admin finds the parked thread through platform.submission_index, because the run lives in the author&#39;s schema.&lt;/font&gt;" vertex="1">
+          <mxGeometry height="90" width="1030" x="60" y="400" as="geometry" />
+        </mxCell>
+        <mxCell id="fle6" edge="1" parent="1" source="fl-san" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=3;strokeColor=#D79B00;" target="fl-adm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fl-mkt" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;verticalAlign=middle;" value="&lt;b&gt;platform.listings — the Marketplace&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;The one deliberately global table. What is here: name, description, topology shape,&lt;br&gt;tool refs + risk + approval, required server slugs, score, publisher org name.&lt;br&gt;&lt;b&gt;What is NOT here: any credential, who built it, internal URLs, their runs or data.&lt;/b&gt;&lt;/font&gt;" vertex="1">
+          <mxGeometry height="100" width="580" x="60" y="530" as="geometry" />
+        </mxCell>
+        <mxCell id="fle7" edge="1" parent="1" source="fl-adm" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;strokeColor=#82B366;" target="fl-mkt">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fle7l" connectable="0" parent="fle7" style="edgeLabel;html=1;fontSize=11;fontStyle=1;labelBackgroundColor=#FFFFFF;fontColor=#82B366;" value="approve" vertex="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fl-back" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontSize=11;dashed=1;" value="&lt;b&gt;back to the author, with notes&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;still theirs, still private&lt;/font&gt;" vertex="1">
+          <mxGeometry height="60" width="390" x="700" y="530" as="geometry" />
+        </mxCell>
+        <mxCell id="fle8" edge="1" parent="1" source="fl-adm" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;dashed=1;strokeColor=#B85450;" target="fl-back">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fle8l" connectable="0" parent="fle8" style="edgeLabel;html=1;fontSize=11;labelBackgroundColor=#FFFFFF;fontColor=#B85450;" value="request changes" vertex="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fl-lane2" parent="1" style="swimlane;html=1;startSize=46;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" value="Company B — Helios Systems&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;schema t_helios — has never seen anything above&lt;/font&gt;" vertex="1">
+          <mxGeometry height="130" width="1030" x="60" y="670" as="geometry" />
+        </mxCell>
+        <mxCell id="fl-6" parent="fl-lane2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=11;verticalAlign=top;spacingTop=6;align=left;spacingLeft=10;" value="&lt;b&gt;6 · Add to my workspace&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;The sanitized config is copied into t_helios as a brand-new agents row.&lt;br&gt;Helios is then walked through connecting each required server slug &lt;b&gt;with their own credentials&lt;/b&gt;.&lt;br&gt;&lt;br&gt;They never touch the original. Northwind&#39;s tokens never went anywhere.&lt;br&gt;The publisher never sees the installer&#39;s runs.&lt;/font&gt;" vertex="1">
+          <mxGeometry height="65" width="990" x="20" y="55" as="geometry" />
+        </mxCell>
+        <mxCell id="fle9" edge="1" parent="1" source="fl-mkt" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;strokeColor=#82B366;" target="fl-lane2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fle9l" connectable="0" parent="fle9" style="edgeLabel;html=1;fontSize=10;labelBackgroundColor=#FFFFFF;" value="install — this is why requires_connection names a SLUG, never a token" vertex="1">
+          <mxGeometry relative="1" x="0.3" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
