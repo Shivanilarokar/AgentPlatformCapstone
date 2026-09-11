@@ -13,28 +13,33 @@ Read `docs/ARCHITECTURE.md` first (plain language, why each decision), then `doc
 
 ### The brief's six steps
 
-| Step | Status | What exists today |
-|---|---|---|
-| 1 Register a tool server | ✅ done | Form: name, transport (stdio / http / sse), endpoint, auth type, shared or private. The platform connects out and calls `tools/list` — no tool is typed by hand. Read / write / destructive marking. Health job every 5 min marks dead servers `down`. Sharing with everyone = `platform_admin` only. |
-| 2 Connect to it | ✅ done | AES-256-GCM envelope encryption, per-row data key, AAD = tenant + server. No endpoint returns a secret; the UI shows dots. A test stores a sentinel token and greps every table in every schema for it. |
-| 3 Describe an agent | ✅ except score | Builder graph with two LangGraph interrupts (`select_tools`, `missing_connection`); survives `docker compose restart api`; form mode drives the *same* graph. **No score shown yet.** |
-| 4 Test it | ⚠️ half | Agent page, graph drawn from the stored config, tools + approval table, raw configuration JSON. **No playground, no runs, no scores, no API tab.** |
-| 5 Publish it | ❌ not started | |
-| 6 Someone else installs it | ❌ not started | |
+| Step | Status | What exists today | Files |
+|---|---|---|---|
+| 1 Register a tool server | ✅ done | Form: name, transport (stdio / http / sse), endpoint, auth type, shared or private. The platform connects out and calls `tools/list` — no tool is typed by hand. Read / write / destructive marking. Health job every 5 min marks dead servers `down`. Sharing with everyone = `platform_admin` only. | `app/api/routers/servers.py` · `app/registry/service.py` · `app/registry/catalogue.py` · `app/registry/health.py` · `app/runtime/mcp_client.py` (transports + `classify_risk`) · `app/models/tenant.py` (`McpServer`, `McpTool`) · `app/models/platform_.py` (`SharedServer`, `SharedTool`) · `web/src/pages/Registry.jsx` · `mcp/local_slack/server.py` |
+| 2 Connect to it | ✅ done | AES-256-GCM envelope encryption, per-row data key, AAD = tenant + server. No endpoint returns a secret; the UI shows dots. A test stores a sentinel token and greps every table in every schema for it. | `app/vault/envelope.py` · `app/vault/service.py` · `app/vault/resolver.py` · `app/api/routers/connections.py` · `app/models/tenant.py` (`Connection`) · `web/src/pages/Connections.jsx` |
+| 3 Describe an agent | ✅ except score | Builder graph with two LangGraph interrupts (`select_tools`, `missing_connection`); survives `docker compose restart api`; form mode drives the *same* graph. **No score shown yet.** | `app/builder/schema.py` (`AgentConfig`) · `app/builder/graph.py` · `app/api/routers/builds.py` · `app/tenancy/checkpointers.py` · `web/src/pages/Build.jsx` |
+| 4 Test it | ⚠️ half | Agent page, graph drawn from the stored config, tools + approval table, raw configuration JSON. **No playground, no runs, no scores, no API tab.** | done: `app/api/routers/agents.py` · `app/runtime/compiler.py` · `app/runtime/guarded_tool.py` · `app/runtime/models.py` · `web/src/pages/MyAgents.jsx` · `web/src/pages/AgentDetail.jsx` — pending: `app/api/routers/runs.py`, `app/scoring/`, Playground/Runs tabs in `AgentDetail.jsx` |
+| 5 Publish it | ❌ not started | | to create: `app/publishing/graph.py`, `app/publishing/sanitize.py`, `app/api/routers/submissions.py`, `web/src/pages/AdminReview.jsx` (replaces `Soon.jsx`) |
+| 6 Someone else installs it | ❌ not started | | to create: `app/api/routers/listings.py`, `platform.listings` in `app/models/platform_.py`, `web/src/pages/Marketplace.jsx` |
+
+Cross-cutting, already done: `app/core/db.py` + `app/api/deps.py` (tenant gate), `app/core/security.py` +
+`app/api/routers/auth.py` (sign-up / sign-in), `app/tenancy/provision.py` (schema per company),
+`app/server.py` (FastAPI app, lifespan), `web/src/Shell.jsx` + `App.jsx` (nav, routes),
+`docker-compose.yml` + `Dockerfile`.
 
 ### The nine graded checks
 
-| # | Check | Status | Mechanism / what is missing |
-|---|---|---|---|
-| 1 | User A cannot reach B's agents, even with the app filter removed | ✅ | one Postgres schema per company; `SET LOCAL search_path` per request; no `WHERE tenant_id` anywhere |
-| 2 | A supplied credential appears nowhere in stored data | ✅ | envelope encryption; token never enters graph state, prompts or logs |
-| 3 | Agent with an unguarded write tool cannot be published | ✅ (at save) | `enforce_approvals()` rewrites a lying config from the registry's risk; the publish gate itself is pending |
-| 4 | Planted confidential material does not survive publication | ❌ | needs the publish graph + allowlist projection |
-| 5 | Kill the server mid-build, it resumes on restart | ✅ | `interrupt()` + per-tenant `AsyncPostgresSaver` |
-| 6 | Approval pending overnight still resumes | ❌ | same checkpointer; needs the admin-review graph |
-| 7 | Playground runs the multi-agent demo incl. approval | ✅ (runtime) | supervisor topology compiled from config; approval inside the tool wrapper — the chat surface is pending |
-| 8 | Downloaded Postman collection gets a real response | ❌ | needs public `/v1/agents/{id}/invoke` + generated collection |
-| 9 | Another company's agent by id does not reveal it exists | ✅ | wrong schema → 0 rows → 404, byte-identical body |
+| # | Check | Status | Mechanism / what is missing | Files |
+|---|---|---|---|---|
+| 1 | User A cannot reach B's agents, even with the app filter removed | ✅ | one Postgres schema per company; `SET LOCAL search_path` per request; no `WHERE tenant_id` anywhere | `app/api/deps.py` · `app/core/db.py` · `app/tenancy/provision.py` · `tests/graded/test_check_01_isolation.py` · `tests/graded/test_no_schema_qualified_queries.py` |
+| 2 | A supplied credential appears nowhere in stored data | ✅ | envelope encryption; token never enters graph state, prompts or logs | `app/vault/envelope.py` · `app/vault/service.py` · `app/runtime/guarded_tool.py` (`redact`) · `tests/graded/test_check_02_credentials.py` |
+| 3 | Agent with an unguarded write tool cannot be published | ✅ (at save) | `enforce_approvals()` rewrites a lying config from the registry's risk; the publish gate itself is pending | `app/builder/schema.py` · `tests/test_agent_config.py` — pending: `app/publishing/` |
+| 4 | Planted confidential material does not survive publication | ❌ | needs the publish graph + allowlist projection | to create: `app/publishing/sanitize.py` · `tests/graded/test_check_04_sanitize.py` |
+| 5 | Kill the server mid-build, it resumes on restart | ✅ | `interrupt()` + per-tenant `AsyncPostgresSaver` | `app/builder/graph.py` · `app/tenancy/checkpointers.py` · `app/api/routers/builds.py` · `tests/graded/test_form_and_chat_agree.py` |
+| 6 | Approval pending overnight still resumes | ❌ | same checkpointer; needs the admin-review graph | to create: `app/publishing/graph.py` · `app/api/routers/submissions.py` · `tests/graded/test_check_06_overnight.py` |
+| 7 | Playground runs the multi-agent demo incl. approval | ✅ (runtime) | supervisor topology compiled from config; approval inside the tool wrapper — the chat surface is pending | `app/runtime/compiler.py` · `app/runtime/guarded_tool.py` · `tests/graded/test_check_07_runtime.py` · `scripts/run_agent.py` — pending: `app/api/routers/runs.py`, Playground tab |
+| 8 | Downloaded Postman collection gets a real response | ❌ | needs public `/v1/agents/{id}/invoke` + generated collection | to create: `app/api/routers/public.py` · `app/api/postman.py` · `tests/graded/test_check_08_postman.py` |
+| 9 | Another company's agent by id does not reveal it exists | ✅ | wrong schema → 0 rows → 404, byte-identical body | `app/api/routers/agents.py` · `app/api/deps.py` (`NOT_FOUND`) · `tests/graded/test_check_01_isolation.py` |
 
 **6 of 9 passing.**
 
@@ -50,14 +55,14 @@ Read `docs/ARCHITECTURE.md` first (plain language, why each decision), then `doc
 
 ### What is pending — build order
 
-| # | Build | Unlocks | Est. | Owner |
-|---|---|---|---|---|
-| 1 | **Playground** — `invoke` / `resume` over SSE, Approve / Reject inline in the chat, runs table | check 7 visible; step 4 complete | 1 day | |
-| 2 | **Scoring** — quality 0–100 and safety A–D, every point traceable to an `agent_checks` row | step 3's score; step 5's gate | ½ day | |
-| 3 | **Publish + Admin Review** — a second graph that parks on `interrupt("admin_review")`; `platform.submission_index` so an admin can resume a run in another schema | checks 4, 6 | 1 day | |
-| 4 | **Marketplace + install** — allowlist projection into `platform.listings`; install copies the config into the installer's schema and asks for their own connections | step 6 | ½ day | |
-| 5 | **Public API + Postman** — `/v1/agents/{id}/invoke`, `/stream`, `/resume`; Postman v2.1 download with the caller's own token pre-filled | check 8 | ½ day | |
-| 6 | **Alembic** — two trees (platform, tenant template) + `migrate_all.py` | replaces `reset_db.py` | ½ day | |
+| # | Build | Unlocks | Files to create / touch | Est. | Owner |
+|---|---|---|---|---|---|
+| 1 | **Playground** — `invoke` / `resume` over SSE, Approve / Reject inline in the chat, runs table | check 7 visible; step 4 complete | `app/api/routers/runs.py` (new) · `Run` model in `app/models/tenant.py` · `web/src/pages/AgentDetail.jsx` (Playground + Runs tabs) · reuse `app/runtime/compiler.py` | 1 day | |
+| 2 | **Scoring** — quality 0–100 and safety A–D, every point traceable to an `agent_checks` row | step 3's score; step 5's gate | `app/scoring/quality.py`, `app/scoring/safety.py` (new) · `AgentCheck` model · `GET /v1/agents/{id}/scores` in `agents.py` · Scores card in `AgentDetail.jsx` | ½ day | |
+| 3 | **Publish + Admin Review** — a second graph that parks on `interrupt("admin_review")`; `platform.submission_index` so an admin can resume a run in another schema | checks 4, 6 | `app/publishing/graph.py`, `app/publishing/sanitize.py` (new) · `app/api/routers/submissions.py` (new) · `Submission`, `SubmissionIndex` models · `web/src/pages/AdminReview.jsx` · Settings tab in `AgentDetail.jsx` | 1 day | |
+| 4 | **Marketplace + install** — allowlist projection into `platform.listings`; install copies the config into the installer's schema and asks for their own connections | step 6 | `app/api/routers/listings.py` (new) · `Listing` model in `platform_.py` · `web/src/pages/Marketplace.jsx` (replaces `Soon.jsx`) | ½ day | |
+| 5 | **Public API + Postman** — `/v1/agents/{id}/invoke`, `/stream`, `/resume`; Postman v2.1 download with the caller's own token pre-filled | check 8 | `app/api/routers/public.py`, `app/api/postman.py` (new) · `ApiToken` model in `platform_.py` · API tab in `AgentDetail.jsx` | ½ day | |
+| 6 | **Alembic** — two trees (platform, tenant template) + `migrate_all.py` | replaces `reset_db.py` | `alembic/platform/`, `alembic/tenant/` (new) · `scripts/migrate_all.py` · call from `app/tenancy/provision.py` | ½ day | |
 
 ≈ 4 engineer-days across four people. **Freeze features 18 Sep.** 19–20 Sep: the nine checks as
 automated tests, demo recording, design write-up.
