@@ -1,0 +1,62 @@
+{
+  "schema_version": "1.0",
+
+  "name": "Issue Digest",
+  "description": "Triages open GitHub issues by severity and posts a morning digest to Slack.",
+
+  "model": {
+    "provider": "google_genai",
+    "name": "gemini-flash-lite-latest",
+    "temperature": 0
+  },
+
+  "topology": {
+    "type": "supervisor",
+    "supervisor": {
+      "instructions": "You coordinate a morning issue digest. First send the work to triager to classify the open issues. Then send the triaged list to reporter to write and post the digest. Do not call tools yourself.",
+      "delegates_to": ["triager", "reporter"]
+    },
+    "specialists": [
+      {
+        "name": "triager",
+        "instructions": "List the open issues and classify each one P0, P1 or P2 with a one-line reason. Never invent issue numbers.",
+        "tools": ["github.list_issues", "github.get_issue"]
+      },
+      {
+        "name": "reporter",
+        "instructions": "Turn the triaged list into a Slack digest under 200 words, P0s first. Post it to the channel you are given.",
+        "tools": ["local_slack.post_message"]
+      }
+    ]
+  },
+
+  "tools": [
+    {
+      "ref": "github.list_issues",
+      "risk": "read",
+      "approval": "auto",
+      "requires_connection": "github"
+    },
+    {
+      "ref": "github.get_issue",
+      "risk": "read",
+      "approval": "auto",
+      "requires_connection": "github"
+    },
+    {
+      "ref": "local_slack.post_message",
+      "risk": "write",
+      "approval": "ask",
+      "requires_connection": "local_slack"
+    }
+  ],
+
+  "policy": {
+    "approval_required_for": ["write", "destructive"],
+    "max_tool_calls": 25
+  },
+
+  "requires_connections": ["github", "local_slack"],
+
+  "schedule": null
+}
