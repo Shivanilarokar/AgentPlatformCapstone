@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[oc]
+.venv/
+.pytest_cache/
+build/
+dist/
+wheels/
+*.egg-info
+
+# Secrets and local state - never committed
+.env
+var/
+
+# Frontend
+web/node_modules/
+web/dist/
+
+# Editors / scratch
+.vscode/
+.idea/
+*.tmp
