@@ -24,7 +24,7 @@ export function Badge({ tone = "", dot = false, children }) {
   );
 }
 
-export const RiskBadge = ({ risk }) => <Badge tone={RISK_CLASS[risk] ?? ""}>{risk}</Badge>;
+export const RiskBadge = ({ risk, label }) => <Badge tone={RISK_CLASS[risk] ?? ""}>{label ?? risk}</Badge>;
 
 export function StatusBadge({ status }) {
   const s = STATUS[status] ?? STATUS.draft;

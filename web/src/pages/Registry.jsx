@@ -23,6 +23,21 @@ import { ago, get, post } from "../api";
 import { Badge, Card, Check, Empty, Field, Loading, RiskBadge, SectionTitle, TopBar } from "../ui";
 
 const TOOLS_SHOWN = 4;
+const RISKS = ["destructive", "write", "read"];
+
+/* The four tools a card shows before "+ N more" cover every risk level the
+ * server has, strictest first - so a card never looks read-only when it is
+ * not. Alphabetical-first-four hid git_reset (destructive) behind git_add. */
+function sample(tools) {
+  const byRisk = RISKS.map((r) => tools.filter((t) => t.risk === r));
+  const out = [];
+  for (let i = 0; out.length < Math.min(TOOLS_SHOWN, tools.length); i++) {
+    for (const bucket of byRisk) {
+      if (bucket[i] && out.length < TOOLS_SHOWN) out.push(bucket[i]);
+    }
+  }
+  return out;
+}
 
 /* --------------------------------------------------------------- one card */
 
@@ -30,8 +45,10 @@ function ServerCard({ server, onRefresh }) {
   const [checking, setChecking] = useState(false);
   const [all, setAll] = useState(false);
 
-  const tools = all ? server.tools : server.tools.slice(0, TOOLS_SHOWN);
+  const tools = all ? server.tools : sample(server.tools);
   const hidden = server.tools.length - tools.length;
+  const counts = RISKS.map((r) => [r, server.tools.filter((t) => t.risk === r).length])
+    .filter(([, n]) => n > 0);
 
   async function recheck() {
     setChecking(true);
@@ -59,6 +76,7 @@ function ServerCard({ server, onRefresh }) {
         <span className="chip">{server.transport}</span>
         <span className="chip">{server.auth_type}</span>
         <span className="chip">{server.tools.length} tools</span>
+        {counts.map(([r, n]) => <RiskBadge key={r} risk={r} label={`${n} ${r}`} />)}
       </div>
 
       <hr className="sep" style={{ margin: "4px 0" }} />
