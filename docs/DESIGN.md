@@ -27,7 +27,7 @@ graph TB
 
     SYS["<b>AGENT PLATFORM</b><br/>builds, runs, scores and<br/>publishes agents from configuration"]
 
-    MCP["<b>MCP tool servers</b><br/>github · filesystem · git<br/>sqlite · local_slack"]
+    MCP["<b>MCP tool servers</b><br/>github · slack · jira (remote)<br/>filesystem · git · sqlite (stdio)"]
     LLM["<b>LLM providers</b><br/>Gemini / Groq / Ollama<br/>free tiers only"]
 
     MEM -->|"describe · test · publish"| SYS
@@ -58,15 +58,13 @@ graph TB
 
     DB[("<b>db</b> · PostgreSQL 16 :5432<br/>schema platform + schema t_&lt;tenant&gt; × N<br/>incl. LangGraph checkpoint tables")]
 
-    SLACK["<b>local_slack</b><br/>our own MCP server :9001<br/>a real write tool"]
+    REMOTE["remote MCP servers<br/>api.githubcopilot.com · mcp.slack.com<br/>mcp.atlassian.com"]
     STDIO["stdio MCP servers<br/>filesystem · git · sqlite"]
-    GH["GitHub MCP<br/>free PAT"]
 
     SPA -->|"HTTPS + Bearer JWT"| API
     API -->|"psycopg3, one pool"| DB
-    API -->|"MCP over HTTP"| SLACK
+    API -->|"MCP over HTTP"| REMOTE
     API -->|"MCP over stdio"| STDIO
-    API -->|"MCP over HTTP"| GH
 
     style API fill:#23409B,color:#fff,stroke:#23409B
     style DB fill:#1B6E45,color:#fff,stroke:#1B6E45
@@ -304,14 +302,14 @@ sequenceDiagram
     participant T as reporter specialist
     participant GT as guarded_tool wrapper
     participant V as vault
-    participant M as local_slack MCP
+    participant M as mcp.slack.com
 
     U->>API: POST /v1/agents/a1/invoke {input}
     API->>S: astream(thread_id = R7)
     S->>S: delegate -> triager (github, read tools)
     Note right of S: read tools run straight through
     S->>T: delegate -> reporter
-    T->>GT: slack.post_message(channel, text)
+    T->>GT: slack.slack_send_message(channel, text)
     GT->>GT: spec.risk == "write"
     GT-->>API: interrupt {tool, risk, redacted args}
     API-->>U: SSE awaiting_approval
@@ -322,7 +320,7 @@ sequenceDiagram
     API->>GT: Command(resume = "approve")
     GT->>V: use(tenant_id, "slack")
     V-->>GT: plaintext token
-    GT->>M: tools/call post_message
+    GT->>M: tools/call slack_send_message
     M-->>GT: {ok: true}
     GT->>GT: del token
     GT-->>S: tool result

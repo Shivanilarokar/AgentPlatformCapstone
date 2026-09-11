@@ -31,8 +31,7 @@ services:
       - "8000:8000"
     volumes:
       - ./app:/srv/app          # edit locally, --reload picks it up, no rebuild
-      - ./mcp:/srv/mcp          # the MCP servers the platform launches
-      - forge_var:/srv/var      # where local_slack keeps its messages
+      - forge_var:/srv/var      # the sqlite server's database file
       - forge_workspace:/srv/workspace   # what the filesystem server may touch
     depends_on:
       db:
@@ -54,21 +53,6 @@ services:
       - /srv/node_modules             # keep the container's node_modules
     depends_on:
       - api
-
-  # Our own MCP server, over HTTP, so there is a real ADDRESS to paste into the
-  # registry: http://local_slack:9001/mcp  (from the api container's point of
-  # view - services resolve each other by name).
-  local_slack:
-    build: .
-    command: ["python", "mcp/local_slack/server.py", "--http"]
-    environment:
-      PORT: "9001"
-      LOCAL_SLACK_STORE: /srv/var/local_slack.json
-    ports:
-      - "9001:9001"
-    volumes:
-      - ./mcp:/srv/mcp
-      - forge_var:/srv/var
 
   # Browser-based Postgres GUI. Open http://localhost:5050
   # Login: admin@forge.dev / admin        Server password: forge

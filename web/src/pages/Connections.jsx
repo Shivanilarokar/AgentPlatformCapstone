@@ -19,8 +19,8 @@ function statusBadge(status) {
   return <Badge tone="warn" dot>{status}</Badge>;
 }
 
-function AddForm({ catalogue, connections, onAdded, onCancel, initialSlug }) {
-  const [name, setSlug] = useState(initialSlug ?? "");
+function AddForm({ catalogue, connections, onAdded, onCancel, initialName }) {
+  const [name, setName] = useState(initialName ?? "");
   const [secret, setSecret] = useState("");
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -30,7 +30,7 @@ function AddForm({ catalogue, connections, onAdded, onCancel, initialSlug }) {
   const existing = connections.find((c) => c.server_name === name && c.status === "active");
 
   useEffect(() => {
-    if (!name && needsAuth.length) setSlug(needsAuth[0].name);
+    if (!name && needsAuth.length) setName(needsAuth[0].name);
   }, [catalogue]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save() {
@@ -57,7 +57,7 @@ function AddForm({ catalogue, connections, onAdded, onCancel, initialSlug }) {
       </div>
       <div className="mb">
         <Field label="Server">
-          <select value={name} onChange={(e) => setSlug(e.target.value)}>
+          <select value={name} onChange={(e) => setName(e.target.value)}>
             {catalogue.map((c) => (
               <option key={c.name} value={c.name}>
                 {c.name}
@@ -89,7 +89,7 @@ function AddForm({ catalogue, connections, onAdded, onCancel, initialSlug }) {
         <Field label="Credential" hint="(stored encrypted, never shown again)">
           <input type="password" className="mono" value={secret} autoComplete="off"
                  onChange={(e) => setSecret(e.target.value)}
-                 placeholder="xoxb-…" />
+                 placeholder={{ github: "ghp_…", slack: "xoxp-…", jira: "ATATT…" }[name] ?? "paste the token"} />
         </Field>
 
         {error && <div className="note warn" style={{ marginBottom: 12 }}>{error}</div>}
@@ -158,7 +158,7 @@ export default function Connections() {
       <div className="content narrow">
         {adding && (
           <AddForm catalogue={catalogue} connections={connections}
-                   initialSlug={requested ?? undefined}
+                   initialName={requested ?? undefined}
                    onAdded={load} onCancel={closeForm} />
         )}
 

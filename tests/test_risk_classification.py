@@ -45,10 +45,33 @@ CASES = [
     ("get_current_time", Risk.READ),
     ("convert_time", Risk.READ),
     ("fetch", Risk.READ),
-    # --- local_slack ----------------------------------------------------
-    ("read_channel", Risk.READ),
-    ("post_message", Risk.WRITE),
-    ("delete_message", Risk.DESTRUCTIVE),
+    # --- slack (mcp.slack.com) -------------------------------------------
+    ("slack_search_messages", Risk.READ),
+    ("slack_read_channel", Risk.READ),
+    ("slack_read_thread", Risk.READ),
+    ("slack_send_message", Risk.WRITE),
+    ("slack_add_reaction", Risk.WRITE),
+    ("slack_create_conversation", Risk.WRITE),
+    ("slack_update_canvas", Risk.WRITE),
+    # --- jira (mcp.atlassian.com, camelCase) -----------------------------
+    ("getJiraIssue", Risk.READ),
+    ("searchJiraIssuesUsingJql", Risk.READ),
+    ("createJiraIssue", Risk.WRITE),
+    ("editJiraIssue", Risk.WRITE),
+    ("transitionJiraIssue", Risk.WRITE),
+    ("addCommentToJiraIssue", Risk.WRITE),
+    ("deleteJiraIssue", Risk.DESTRUCTIVE),
+    # --- sqlite (mcp-server-sqlite) --------------------------------------
+    ("read_query", Risk.READ),
+    ("list_tables", Risk.READ),
+    ("describe_table", Risk.READ),
+    ("write_query", Risk.WRITE),
+    ("create_table", Risk.WRITE),
+    ("append_insight", Risk.WRITE),
+    # --- github remote extras --------------------------------------------
+    ("delete_file", Risk.DESTRUCTIVE),
+    ("delete_pending_pull_request_review", Risk.DESTRUCTIVE),
+    ("get_pull_request_diff", Risk.READ),
 ]
 
 

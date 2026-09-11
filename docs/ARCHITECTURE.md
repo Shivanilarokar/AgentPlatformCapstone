@@ -429,10 +429,12 @@ their **behaviour and layout** and throw the fixtures away.
 - **Real tokens, really encrypted.** The credential you paste is the credential the tool call uses.
 - **The demo agent is built by using our own product**, through the builder chat — not inserted.
 
-The one server we host ourselves is `mcp/local_slack/`: a **real MCP server we wrote**, serving a
-genuine `post_message` write tool over HTTP with a genuine token, because a real Slack workspace is
-not free. It is a real implementation of a real interface, not a stub. Call it `local_slack` in the
-UI so nobody mistakes it for a fake.
+Every server in the registry's quick-picks is the vendor's own: GitHub's remote MCP server
+(`api.githubcopilot.com/mcp`), Slack's (`mcp.slack.com/mcp`), Atlassian's for Jira
+(`mcp.atlassian.com/v2/mcp`), and the reference `filesystem`, `git` and `sqlite` servers launched
+over stdio. Their tool lists are never typed in — they are whatever `tools/list` returned. The
+remote three refuse an anonymous `tools/list`, so the registry asks for a credential at that point
+and saves it as the connection in the same step.
 
 **Acceptance bar for every screen:** delete the database, `docker compose up`, sign up, and reach
 that screen's finished state using only the product.

@@ -28,6 +28,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
+import httpx
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
@@ -49,9 +50,17 @@ class Endpoint:
     token_env: str | None = None
     #: extra args for stdio commands
     args: list[str] = field(default_factory=list)
+    #: none | api_key | oauth. "none" means a missing token is not a problem.
+    auth_type: str = "none"
 
     @classmethod
-    def parse(cls, transport: str, endpoint: str, token_env: str | None = None) -> "Endpoint":
+    def parse(
+        cls,
+        transport: str,
+        endpoint: str,
+        token_env: str | None = None,
+        auth_type: str = "none",
+    ) -> "Endpoint":
         """From what a user typed into the registration form."""
         transport = transport.lower()
         endpoint = endpoint.strip()
@@ -65,11 +74,11 @@ class Endpoint:
             parts = shlex.split(cmdline)
             if not parts:
                 raise ValueError("a stdio endpoint needs a command")
-            return cls("stdio", parts[0], token_env, parts[1:])
+            return cls("stdio", parts[0], token_env, parts[1:], auth_type)
         if transport in ("http", "sse"):
             if not endpoint.startswith(("http://", "https://")):
                 raise ValueError(f"a {transport} endpoint must be a URL")
-            return cls(transport, endpoint, token_env)
+            return cls(transport, endpoint, token_env, [], auth_type)
         raise ValueError(f"unknown transport {transport!r}")
 
     @property
@@ -77,6 +86,18 @@ class Endpoint:
         if self.transport == "stdio":
             return f"stdio://{self.target} {' '.join(self.args)}".strip()
         return self.target
+
+    @property
+    def needs_token(self) -> bool:
+        return self.auth_type != "none"
+
+
+class AuthRequired(Exception):
+    """The server is alive but will not even list its tools without a credential.
+
+    GitHub, Slack and Atlassian all answer 401 to an anonymous `initialize`.
+    That is not "unreachable" - it is the registry's cue to ask for a token.
+    """
 
 
 # ------------------------------------------------------------- risk marking
@@ -106,12 +127,17 @@ _READ = frozenset({
 })
 
 _TOKENS = re.compile(r"[a-z]+")
+_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 
 
 def _words(text: str) -> list[str]:
-    """Tokens in order, each followed by its singular form ("writes" -> "write")."""
+    """Tokens in order, each followed by its singular form ("writes" -> "write").
+
+    camelCase is split first: Atlassian names its tools `createJiraIssue`, and
+    "createjiraissue" as one token would match nothing and fall through to read.
+    """
     out: list[str] = []
-    for token in _TOKENS.findall(text.lower()):
+    for token in _TOKENS.findall(_CAMEL.sub("_", text).lower()):
         out.append(token)
         if token.endswith("s"):
             out.append(token[:-1])
@@ -168,9 +194,39 @@ def _resolve(command: str) -> str:
     return shutil.which(command) or shutil.which(f"{command}.cmd") or command
 
 
+_INITIALIZE = {
+    "jsonrpc": "2.0", "id": 0, "method": "initialize",
+    "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+               "clientInfo": {"name": "forge", "version": "0"}},
+}
+
+
+async def _probe(ep: Endpoint, token: str | None) -> None:
+    """One plain HTTP request before the MCP session, to tell 401 from "down".
+
+    The MCP client folds every HTTP failure into one generic error, so the only
+    way to know a server wants a credential is to ask it ourselves first.
+    """
+    headers = {"Accept": "application/json, text/event-stream"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as http:
+        if ep.transport == "sse":
+            async with http.stream("GET", ep.target, headers=headers) as r:
+                status = r.status_code
+        else:
+            r = await http.post(ep.target, json=_INITIALIZE, headers=headers)
+            status = r.status_code
+    if status in (401, 403):
+        raise AuthRequired(f"{ep.target} answered {status}: a credential is required")
+
+
 @asynccontextmanager
 async def _connect(ep: Endpoint, token: str | None) -> AsyncIterator[ClientSession]:
     """One initialised session, over whichever transport the server speaks."""
+    if ep.transport != "stdio":
+        await _probe(ep, token)
+
     if ep.transport == "stdio":
         env = dict(os.environ)
         if ep.token_env:

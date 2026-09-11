@@ -27,6 +27,7 @@ from app.core.db import engine, platform_session, tenant_session
 from app.models.platform_ import SharedServer
 from app.models.tenant import McpServer
 from app.registry import service
+from app.vault import service as vault
 
 log = logging.getLogger(__name__)
 
@@ -58,7 +59,12 @@ async def check_everything() -> dict[str, str]:
             async with tenant_session(tenant_slug) as s:
                 for srv in await s.scalars(select(McpServer)):
                     try:
-                        results[f"{tenant_slug}/{srv.name}"] = await service.refresh(s, srv.name)
+                        # Borrowed for this one tools/list call, then dropped.
+                        token = await vault.use(s, tenant=tenant_slug, server_name=srv.name)
+                        results[f"{tenant_slug}/{srv.name}"] = await service.refresh(
+                            s, srv.name, token=token
+                        )
+                        del token
                     except Exception as exc:  # noqa: BLE001
                         log.warning("health: %s/%s: %s", tenant_slug, srv.name, exc)
                         results[f"{tenant_slug}/{srv.name}"] = "error"

@@ -25,7 +25,7 @@
       {
         "name": "reporter",
         "instructions": "Turn the triaged list into a Slack digest under 200 words, P0s first. Post it to the channel you are given.",
-        "tools": ["local_slack.post_message"]
+        "tools": ["slack.slack_send_message"]
       }
     ]
   },
@@ -44,10 +44,10 @@
       "requires_connection": "github"
     },
     {
-      "ref": "local_slack.post_message",
+      "ref": "slack.slack_send_message",
       "risk": "write",
       "approval": "ask",
-      "requires_connection": "local_slack"
+      "requires_connection": "slack"
     }
   ],
 
@@ -56,7 +56,7 @@
     "max_tool_calls": 25
   },
 
-  "requires_connections": ["github", "local_slack"],
+  "requires_connections": ["github", "slack"],
 
   "schedule": null
 }

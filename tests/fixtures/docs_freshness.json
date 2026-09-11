@@ -1,0 +1,61 @@
+{
+  "schema_version": "1.0",
+  "name": "Docs Freshness",
+  "description": "Reads the handbook, finds stale sections, and writes a report file for review.",
+  "model": {
+    "provider": "google_genai",
+    "name": "gemini-flash-lite-latest",
+    "temperature": 0
+  },
+  "topology": {
+    "type": "supervisor",
+    "supervisor": {
+      "instructions": "Send the work to reader first, then hand what it found to writer. Do not call tools yourself.",
+      "delegates_to": [
+        "reader",
+        "writer"
+      ]
+    },
+    "specialists": [
+      {
+        "name": "reader",
+        "instructions": "Read handbook.md and list every section that mentions a path or command.",
+        "tools": [
+          "filesystem.read_text_file"
+        ]
+      },
+      {
+        "name": "writer",
+        "instructions": "Write a short report of stale sections to report.md.",
+        "tools": [
+          "filesystem.write_file"
+        ]
+      }
+    ]
+  },
+  "tools": [
+    {
+      "ref": "filesystem.read_text_file",
+      "risk": "read",
+      "approval": "auto",
+      "requires_connection": "filesystem"
+    },
+    {
+      "ref": "filesystem.write_file",
+      "risk": "write",
+      "approval": "ask",
+      "requires_connection": "filesystem"
+    }
+  ],
+  "policy": {
+    "approval_required_for": [
+      "write",
+      "destructive"
+    ],
+    "max_tool_calls": 25
+  },
+  "requires_connections": [
+    "filesystem"
+  ],
+  "schedule": null
+}

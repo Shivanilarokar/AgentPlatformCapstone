@@ -3,9 +3,9 @@ FROM python:3.11-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv  /usr/local/bin/uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uvx /usr/local/bin/uvx
 
-# The platform launches real open-source MCP servers as subprocesses:
-#   uvx  -> the Python ones (mcp-server-git, -fetch, -time)
-#   npx  -> the Node ones   (@modelcontextprotocol/server-filesystem, -memory)
+# The platform launches the reference MCP servers as subprocesses:
+#   uvx  -> the Python ones (mcp-server-git, mcp-server-sqlite)
+#   npx  -> the Node one    (@modelcontextprotocol/server-filesystem)
 # git itself is a runtime dependency of mcp-server-git.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends nodejs npm git ca-certificates \
@@ -22,10 +22,9 @@ COPY pyproject.toml README.md ./
 RUN uv pip install --system --no-cache -r pyproject.toml
 
 COPY app ./app
-COPY mcp ./mcp
 
 # /srv/workspace is the only directory the filesystem server may touch.
-# /srv/var is where local_slack keeps its messages.
+# /srv/var holds the sqlite server's database file.
 # mcp-server-git needs an actual repository, so make one the agents can use.
 RUN mkdir -p /srv/workspace /srv/var \
  && git config --global user.email "agent@forge.local" \

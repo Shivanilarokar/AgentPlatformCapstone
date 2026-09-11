@@ -66,7 +66,7 @@
         <mxCell id="ov-e7" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;" parent="1" source="ov-builder" target="ov-pg" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ov-mcp" value="&lt;b&gt;MCP servers&lt;/b&gt; (all free, all real)&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#555555&quot;&gt;filesystem · git · sqlite (stdio) · GitHub (free PAT) · local_slack (ours, HTTP, has a real write tool)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=middle;fontSize=11;" parent="1" vertex="1">
+        <mxCell id="ov-mcp" value="&lt;b&gt;MCP servers&lt;/b&gt; (all free, all real)&#xa;&lt;br&gt;&lt;font style=&quot;font-size:10px;color:#555555&quot;&gt;filesystem · git · sqlite (stdio, reference servers) · GitHub · Slack · Jira (the vendors' remote servers, HTTP)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=middle;fontSize=11;" parent="1" vertex="1">
           <mxGeometry x="120" y="740" width="490" height="60" as="geometry" />
         </mxCell>
         <mxCell id="ov-e8" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;dashed=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;" parent="1" source="ov-registry" target="ov-mcp" edge="1">
@@ -275,7 +275,7 @@
         <mxCell id="rt-tri" value="&lt;b&gt;triager&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;github: 2 read tools&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" parent="1" vertex="1">
           <mxGeometry x="900" y="120" width="150" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="rt-rep" value="&lt;b&gt;reporter&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;local_slack: post_message&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" parent="1" vertex="1">
+        <mxCell id="rt-rep" value="&lt;b&gt;reporter&lt;/b&gt;&#xa;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;slack: slack_send_message&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" parent="1" vertex="1">
           <mxGeometry x="900" y="280" width="150" height="50" as="geometry" />
         </mxCell>
         <mxCell id="rte2" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" parent="1" source="rt-msg" target="rt-sup" edge="1">

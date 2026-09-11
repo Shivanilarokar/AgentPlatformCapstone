@@ -1,33 +1,23 @@
-"""The MCP servers this deployment knows how to launch.
+"""The public MCP servers the registry offers as quick-picks.
 
-All of these are REAL open-source servers from the Model Context Protocol
-project, fetched and run by the platform. Nothing here is a stub, and none of
-them needs a paid account.
+Every entry is the vendor's own server, reached the way the vendor documents:
 
-Why a catalogue at all: in a hosted product you would paste any address. Here
-the platform ships with a set it can start itself, so a clean `docker compose up`
-gives you something to register on the very first screen. Registering still does
-the real thing - connect, ask for the tool list, store the answer.
+    github      GitHub's remote server      https://api.githubcopilot.com/mcp/
+    slack       Slack's remote server       https://mcp.slack.com/mcp
+    jira        Atlassian's remote server   https://mcp.atlassian.com/v2/mcp
+    filesystem  @modelcontextprotocol/server-filesystem   (npx, stdio)
+    git         mcp-server-git                            (uvx, stdio)
+    sqlite      mcp-server-sqlite                         (uvx, stdio)
 
-WHAT EACH ONE DEMONSTRATES
-
-    github      26 tools and a REAL credential. This is the one that exercises
-                the brief's step 1 -> step 2 split: it lists its tools without a
-                token, but refuses to call one without a valid PAT. So you
-                register it first, and connect it second, exactly as described.
-    filesystem  14 tools across all three risk levels.
-    git         12 tools, read AND write (git_commit, git_create_branch).
-    memory      a knowledge graph, with delete_* tools marked destructive.
-    fetch       one read tool that reaches the internet.
-    time        two read tools. The simplest possible server.
-    local_slack ours. Kept so a clean checkout with no GitHub PAT can still run
-                the whole demo - a grader should never be blocked on an account.
+Nothing here lists a tool. Registering a quick-pick does exactly what pasting
+the address by hand does: connect, call tools/list, store the answer. The three
+remote servers answer 401 to an anonymous tools/list, so the registry asks for
+a credential at that point and saves it as the connection in the same step.
 """
 
 from __future__ import annotations
 
-import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from app.runtime.mcp_client import Endpoint
 
@@ -35,82 +25,79 @@ from app.runtime.mcp_client import Endpoint
 @dataclass(frozen=True)
 class ServerSpec:
     name: str
-    command: str
-    args: list[str] = field(default_factory=list)
-    description: str = ""
-    auth_type: str = "none"
-    #: env var this server reads its credential from, if it needs one
+    transport: str  # http | stdio
+    #: a URL, or a stdio command line
+    endpoint: str
+    description: str
+    auth_type: str = "none"  # none | api_key | oauth
+    #: stdio only - env var the subprocess reads its credential from
     token_env: str | None = None
-    #: "shared" ships with the platform; "private" is registered by one company
-    scope: str = "shared"
+    #: what the Connections screen asks the user to paste
+    credential_hint: str = ""
     homepage: str = ""
 
-    @property
-    def endpoint(self) -> str:
-        return f"stdio://{self.command} {' '.join(self.args)}".strip()
-
     def to_endpoint(self) -> Endpoint:
-        return Endpoint("stdio", self.command, self.token_env, list(self.args))
+        return Endpoint.parse(self.transport, self.endpoint, self.token_env, self.auth_type)
 
 
-#: `uvx` and `npx` fetch and run these on first use. Both are in the api image.
 CATALOGUE: dict[str, ServerSpec] = {
     "github": ServerSpec(
         name="github",
-        command="npx",
-        args=["-y", "@modelcontextprotocol/server-github"],
-        description="Issues, pull requests, files and repositories on GitHub. "
-        "26 tools, from search_repositories (read) to create_issue (write).",
+        transport="http",
+        endpoint="https://api.githubcopilot.com/mcp/",
+        description="GitHub's official remote MCP server: repositories, issues, pull "
+        "requests, code search, Actions. Tools are discovered live from its tools/list.",
         auth_type="api_key",
-        token_env="GITHUB_PERSONAL_ACCESS_TOKEN",
-        homepage="https://github.com/modelcontextprotocol/servers",
+        credential_hint="A GitHub personal access token (Settings → Developer settings → "
+        "Tokens). Sent as Authorization: Bearer.",
+        homepage="https://github.com/github/github-mcp-server",
+    ),
+    "slack": ServerSpec(
+        name="slack",
+        transport="http",
+        endpoint="https://mcp.slack.com/mcp",
+        description="Slack's official remote MCP server: search, read channels and "
+        "threads, send messages, canvases and lists.",
+        auth_type="oauth",
+        credential_hint="A Slack user OAuth token (xoxp-…) from an app installed to your "
+        "workspace. Sent as Authorization: Bearer.",
+        homepage="https://docs.slack.dev/ai/slack-mcp-server",
+    ),
+    "jira": ServerSpec(
+        name="jira",
+        transport="http",
+        endpoint="https://mcp.atlassian.com/v2/mcp",
+        description="Atlassian's official remote MCP server (Rovo): Jira issues, JQL "
+        "search, transitions, comments; Confluence pages.",
+        auth_type="api_key",
+        credential_hint="A scoped Atlassian API token, with API-token auth enabled by "
+        "your org admin. Sent as Authorization: Bearer.",
+        homepage="https://github.com/atlassian/atlassian-mcp-server",
     ),
     "filesystem": ServerSpec(
         name="filesystem",
-        command="npx",
-        args=["-y", "@modelcontextprotocol/server-filesystem", "/srv/workspace"],
-        description="Read, search, write and move files in a mounted directory.",
-        homepage="https://github.com/modelcontextprotocol/servers",
+        transport="stdio",
+        endpoint="npx -y @modelcontextprotocol/server-filesystem /srv/workspace",
+        description="The reference filesystem server, confined to /srv/workspace: read, "
+        "search, write, edit and move files.",
+        homepage="https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
     ),
     "git": ServerSpec(
         name="git",
-        command="uvx",
-        args=["mcp-server-git", "--repository", "/srv/workspace"],
-        description="Inspect and modify a git repository: status, diff, log, commit, branch. "
-        "Shares /srv/workspace with the filesystem server, so an agent can write a file "
-        "and then commit it.",
-        homepage="https://github.com/modelcontextprotocol/servers",
+        transport="stdio",
+        endpoint="uvx mcp-server-git --repository /srv/workspace",
+        description="The reference git server on the same /srv/workspace: status, diff, "
+        "log, commit, branch, checkout, reset.",
+        homepage="https://github.com/modelcontextprotocol/servers/tree/main/src/git",
     ),
-    "memory": ServerSpec(
-        name="memory",
-        command="npx",
-        args=["-y", "@modelcontextprotocol/server-memory"],
-        description="A knowledge graph the agent can add to, read back and delete from.",
-        homepage="https://github.com/modelcontextprotocol/servers",
-    ),
-    "fetch": ServerSpec(
-        name="fetch",
-        command="uvx",
-        args=["mcp-server-fetch"],
-        description="Fetch a URL and convert it to markdown for the model to read.",
-        homepage="https://github.com/modelcontextprotocol/servers",
-    ),
-    "time": ServerSpec(
-        name="time",
-        command="uvx",
-        args=["mcp-server-time"],
-        description="Current time in any timezone, and conversion between them.",
-        homepage="https://github.com/modelcontextprotocol/servers",
-    ),
-    "local_slack": ServerSpec(
-        name="local_slack",
-        command=sys.executable,
-        args=["mcp/local_slack/server.py"],
-        description="A Slack-like workspace: read a channel, post to it, delete a message.",
-        auth_type="api_key",
-        token_env="LOCAL_SLACK_TOKEN",
-        scope="private",
-        homepage="mcp/local_slack/server.py",
+    "sqlite": ServerSpec(
+        name="sqlite",
+        transport="stdio",
+        # The package predates MCP SDK 2.x; pin the SDK it was written against.
+        endpoint="uvx --with mcp<2 mcp-server-sqlite --db-path /srv/var/forge.sqlite",
+        description="The reference SQLite server: list and describe tables, run SELECT "
+        "queries, run INSERT/UPDATE/DELETE, create tables.",
+        homepage="https://github.com/modelcontextprotocol/servers-archived/tree/main/src/sqlite",
     ),
 }
 

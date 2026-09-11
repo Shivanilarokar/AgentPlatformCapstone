@@ -76,18 +76,18 @@ def guarded_tool(spec: ToolSpec, ctx: RunContext) -> Callable[..., Awaitable[str
                 return f"Rejected by the user. {spec.ref} was not executed."
 
         # ---- 2. borrow the credential ------------------------------------
+        ep = await ctx.resolve_endpoint(spec.requires_connection)
+        if ep is None:
+            return f"{spec.requires_connection} is not in this workspace's registry."
+
         token = await ctx.resolve_token(spec.requires_connection)
-        if token is None:
+        if token is None and ep.needs_token:
             # DEGRADED, not crashed: the agent keeps working and reports the
             # broken tool, exactly as the Connections screen describes.
             return (
                 f"{spec.requires_connection} is not connected in this workspace, "
                 f"so {spec.ref} could not run."
             )
-
-        ep = await ctx.resolve_endpoint(spec.requires_connection)
-        if ep is None:
-            return f"{spec.requires_connection} is not in this workspace's registry."
 
         # ---- 3. use it for exactly one call, then drop it -----------------
         try:

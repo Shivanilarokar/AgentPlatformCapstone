@@ -1,4 +1,4 @@
-/* MCP Registry.
+/* MCP Registry - screens/registry.html, made real.
  *
  * The five things this screen must do, from the mockup:
  *
@@ -10,6 +10,10 @@
  *
  * There is no field on this form where you could type a tool name, because if
  * there were, the registry would be wrong the moment a server changed.
+ *
+ * The three remote servers (GitHub, Slack, Atlassian) answer 401 to an
+ * anonymous tools/list. The API reports that as `auth_required`; the form then
+ * shows a credential field, and "Connect & save" does both things at once.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -31,7 +35,7 @@ function ServerCard({ server, onRefresh }) {
 
   async function recheck() {
     setChecking(true);
-    try { await post(`/v1/servers/${server.name}/refresh`); } catch { /* card will say down */ }
+    try { await post(`/v1/servers/${server.name}/refresh`); } catch { /* the card will say down */ }
     await onRefresh();
     setChecking(false);
   }
@@ -40,17 +44,13 @@ function ServerCard({ server, onRefresh }) {
     <Card className="srv">
       <div className="between">
         <div className="row" style={{ gap: 8 }}>
-          <b style={{ fontSize: 14.5 }}>{server.name}</b>
+          <b style={{ fontSize: 14.5 }} title={server.endpoint}>{server.name}</b>
           <Badge tone={server.status === "ok" ? "ok" : "danger"} dot>{server.status}</Badge>
           {server.scope === "private" && <Badge>private</Badge>}
         </div>
-        {server.auth_type === "none" ? (
-          <Badge tone="ok">no credential needed</Badge>
-        ) : server.connected ? (
-          <Badge tone="ok">connected</Badge>
-        ) : (
-          <Link className="btn primary sm" to={`/connections?add=${server.name}`}>Connect</Link>
-        )}
+        {server.connected
+          ? <Badge tone="ok">connected</Badge>
+          : <Link className="btn primary sm" to={`/connections?add=${server.name}`}>Connect</Link>}
       </div>
 
       <div className="muted" style={{ fontSize: 12.8 }}>{server.description || "—"}</div>
@@ -60,12 +60,8 @@ function ServerCard({ server, onRefresh }) {
         <span className="chip">{server.auth_type}</span>
         <span className="chip">{server.tools.length} tools</span>
       </div>
-      <div className="mono faint" style={{ fontSize: 11, wordBreak: "break-all" }}>
-        {server.endpoint}
-      </div>
 
       <hr className="sep" style={{ margin: "4px 0" }} />
-
       <div>
         {tools.map((t) => (
           <div className="toolrow" key={t.name}>
@@ -73,16 +69,15 @@ function ServerCard({ server, onRefresh }) {
             <RiskBadge risk={t.risk} />
           </div>
         ))}
-        {hidden > 0 && <button className="linkish" onClick={() => setAll(true)}>+ {hidden} more</button>}
+        {hidden > 0 && (
+          <button className="linkish" onClick={() => setAll(true)}>+ {hidden} more</button>
+        )}
       </div>
 
       <div className="between">
-        <span className="faint" style={{ fontSize: 11.5 }}>
-          checked {ago(server.last_checked_at)}
-          {server.scope === "shared" && server.shared_by && ` · shared by ${server.shared_by}`}
-        </span>
-        <button className="btn sm" onClick={recheck} disabled={checking}>
-          {checking ? "checking…" : "Re-check"}
+        <span className="faint" style={{ fontSize: 11.5 }}>checked {ago(server.last_checked_at)}</span>
+        <button className="linkish" style={{ padding: 0 }} onClick={recheck} disabled={checking}>
+          {checking ? "checking…" : "re-check"}
         </button>
       </div>
     </Card>
@@ -92,29 +87,39 @@ function ServerCard({ server, onRefresh }) {
 /* ---------------------------------------------------------------- the form */
 
 const EMPTY = {
-  name: "", transport: "http", endpoint: "", auth_type: "none",
+  name: "", transport: "http", endpoint: "", auth_type: "oauth",
   token_env: "", description: "", visibility: "private", token: "",
 };
+
+const STEPS = [
+  "Open a connection to the endpoint",
+  "Ask it for its tool list",
+  "Mark each tool read, write or destructive",
+  "Store the list; mark the server healthy",
+];
 
 function RegisterForm({ catalogue, isAdmin, onRegistered }) {
   const [f, setF] = useState(EMPTY);
   const [error, setError] = useState(null);
-  const [status, setStatus] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [needsToken, setNeedsToken] = useState(false);
+  const [phase, setPhase] = useState("idle"); // idle | connecting | ok | failed
+  const [hint, setHint] = useState("");
 
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
 
-  function quickPick(c) {
+  const quickPick = useCallback((c) => {
     setF({
       ...EMPTY,
       name: c.name, transport: c.transport, endpoint: c.endpoint,
       auth_type: c.auth_type, token_env: c.token_env ?? "", description: c.description,
     });
-    setError(null); setStatus("");
-  }
+    setHint(c.credential_hint || "");
+    setNeedsToken(c.transport !== "stdio" && c.auth_type !== "none");
+    setError(null); setPhase("idle");
+  }, []);
 
   async function save() {
-    setError(null); setStatus("connecting…"); setBusy(true);
+    setError(null); setPhase("connecting");
     try {
       const created = await post("/v1/servers", {
         name: f.name.trim(), transport: f.transport, endpoint: f.endpoint.trim(),
@@ -122,21 +127,32 @@ function RegisterForm({ catalogue, isAdmin, onRegistered }) {
         description: f.description.trim(), visibility: f.visibility,
         token: f.token || null,
       });
-      setStatus(`found ${created.tools.length} tools`);
-      setF(EMPTY);
-      await onRegistered();
+      setPhase("ok");
+      setError(null);
+      setF(EMPTY); setNeedsToken(false); setHint("");
+      await onRegistered(created);
     } catch (e) {
-      setStatus("");
-      setError(e.message);
+      setPhase("failed");
+      if (e.code === "auth_required") {
+        setNeedsToken(true);
+        setError(`${f.name} answered but will not list its tools without a credential. Paste one and save again.`);
+      } else {
+        setError(e.message);
+      }
     }
-    setBusy(false);
+  }
+
+  function cancel() {
+    setF(EMPTY); setError(null); setPhase("idle"); setNeedsToken(false); setHint("");
   }
 
   const placeholder = {
-    http: "https://mcp.example.com/mcp   or   http://local_slack:9001/mcp",
+    http: "https://api.githubcopilot.com/mcp/",
     sse: "https://mcp.example.com/sse",
-    stdio: "npx -y @modelcontextprotocol/server-memory",
+    stdio: "npx -y @modelcontextprotocol/server-filesystem /srv/workspace",
   }[f.transport];
+
+  const showToken = needsToken || (f.auth_type !== "none" && f.transport !== "stdio");
 
   return (
     <div id="register-form">
@@ -147,6 +163,14 @@ function RegisterForm({ catalogue, isAdmin, onRegistered }) {
             <div style={{ fontWeight: 650, fontSize: 14.5 }}>Register an MCP server</div>
             <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
               Saved only after the platform successfully connects.
+            </div>
+            <div className="row wrap" style={{ gap: 5, marginTop: 8 }}>
+              {catalogue.map((c) => (
+                <button key={c.name} className="chip" style={{ cursor: "pointer" }}
+                        onClick={() => quickPick(c)} title={c.endpoint}>
+                  {c.name}
+                </button>
+              ))}
             </div>
           </div>
           <div className="mb">
@@ -161,34 +185,35 @@ function RegisterForm({ catalogue, isAdmin, onRegistered }) {
                 <option value="stdio">stdio</option>
               </select>
             </Field>
-            <Field label="Endpoint" hint={f.transport === "stdio" ? "(a command line)" : "(an address)"}>
+            <Field label="Endpoint">
               <input className="mono" value={f.endpoint} onChange={set("endpoint")}
                      placeholder={placeholder} autoComplete="off" />
             </Field>
             <Field label="Authentication">
               <select value={f.auth_type} onChange={set("auth_type")}>
-                <option value="none">none</option>
-                <option value="api_key">api_key</option>
                 <option value="oauth">oauth</option>
+                <option value="api_key">api_key</option>
+                <option value="none">none</option>
               </select>
             </Field>
             {f.transport === "stdio" && f.auth_type !== "none" && (
               <Field label="Credential env var" hint="(what the subprocess reads)">
                 <input className="mono" value={f.token_env} onChange={set("token_env")}
-                       placeholder="GITHUB_PERSONAL_ACCESS_TOKEN" />
+                       placeholder="GITHUB_PERSONAL_ACCESS_TOKEN" autoComplete="off" />
+              </Field>
+            )}
+            {showToken && (
+              <Field label="Credential" hint="(encrypted; saved as your connection)">
+                <input type="password" className="mono" value={f.token} onChange={set("token")}
+                       placeholder="paste it here" autoComplete="new-password" />
+                {hint && <div className="faint" style={{ fontSize: 11.5, marginTop: 4 }}>{hint}</div>}
               </Field>
             )}
             <Field label="Visible to">
-              <select value={f.visibility} onChange={set("visibility")}>
+              <select value={f.visibility} onChange={set("visibility")} style={{ marginBottom: 2 }}>
                 <option value="private">Just my workspace</option>
-                <option value="shared" disabled={!isAdmin}>
-                  Everyone{isAdmin ? "" : " (platform admin only)"}
-                </option>
+                <option value="shared" disabled={!isAdmin}>Everyone (admin only)</option>
               </select>
-            </Field>
-            <Field label="Credential" hint="(used for this call only, if the server needs one to answer)">
-              <input type="password" className="mono" value={f.token} onChange={set("token")}
-                     placeholder={f.auth_type === "none" ? "not needed" : "optional for discovery"} />
             </Field>
 
             {error && (
@@ -199,13 +224,10 @@ function RegisterForm({ catalogue, isAdmin, onRegistered }) {
 
             <div className="row">
               <button className="btn primary sm" onClick={save}
-                      disabled={busy || !f.name.trim() || !f.endpoint.trim()}>
-                Connect &amp; save
+                      disabled={phase === "connecting" || !f.name.trim() || !f.endpoint.trim()}>
+                {phase === "connecting" ? "Connecting…" : "Connect & save"}
               </button>
-              <button className="btn sm" onClick={() => { setF(EMPTY); setError(null); setStatus(""); }}>
-                Clear
-              </button>
-              <span className="faint" style={{ fontSize: 12 }}>{status}</span>
+              <button className="btn sm" onClick={cancel}>Cancel</button>
             </div>
           </div>
         </div>
@@ -213,30 +235,20 @@ function RegisterForm({ catalogue, isAdmin, onRegistered }) {
         <div style={{ flex: 1, minWidth: 280 }}>
           <Card>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>What happens on save</div>
-            <Check ok mark="1">Open a connection to the endpoint</Check>
-            <Check ok mark="2">Ask it for its tool list</Check>
-            <Check ok mark="3">Mark each tool read, write or destructive</Check>
-            <Check ok mark="4">Store the list; mark the server healthy</Check>
-            <Check ok={false}><span className="muted">If it does not answer, nothing is saved</span></Check>
+            {STEPS.map((s, i) => (
+              <Check key={s} ok={phase !== "failed"} mark={phase === "ok" ? "✓" : i + 1}>
+                {phase === "connecting" && i === 0 ? <b>{s}…</b> : s}
+              </Check>
+            ))}
+            <Check ok={false}>
+              <span className={phase === "failed" ? "" : "muted"}>
+                If it does not answer, nothing is saved
+              </span>
+            </Check>
             <hr className="sep" />
             <div className="faint" style={{ fontSize: 12 }}>
-              A scheduled job re-checks every server every five minutes and marks the dead ones.
-              Agents that depend on a dead server show as degraded.
-            </div>
-          </Card>
-
-          <Card style={{ marginTop: 14 }}>
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>Quick picks</div>
-            <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
-              Real open-source MCP servers the platform can launch itself. Click one to fill the
-              form, then save it like anything else.
-            </div>
-            <div className="row wrap" style={{ gap: 6 }}>
-              {catalogue.map((c) => (
-                <button key={c.name} className="btn sm" onClick={() => quickPick(c)} title={c.description}>
-                  {c.name}
-                </button>
-              ))}
+              A scheduled job re-checks every server and marks the dead ones. Agents that depend
+              on a dead server show as degraded.
             </div>
           </Card>
         </div>
@@ -265,6 +277,10 @@ export default function Registry() {
 
   useEffect(() => { load(); }, [load]);
 
+  function scrollToForm() {
+    document.getElementById("register-form")?.scrollIntoView({ behavior: "smooth" });
+  }
+
   if (error) return <div className="content"><div className="note warn">{error}</div></div>;
   if (!servers) return <Loading what="the registry" />;
 
@@ -276,17 +292,13 @@ export default function Registry() {
       <TopBar
         title="MCP Registry"
         sub="Tool servers your agents can use. Register one, connect once, reuse everywhere."
-        actions={
-          <button className="btn primary"
-                  onClick={() => document.getElementById("register-form")?.scrollIntoView({ behavior: "smooth" })}>
-            + Register a server
-          </button>
-        }
+        actions={<button className="btn primary" onClick={scrollToForm}>+ Register a server</button>}
       />
       <div className="content">
         {servers.length === 0 && (
           <Empty title="No servers yet">
-            Register one below — paste an address, or pick one the platform can launch.
+            Register one below — paste an address, or pick GitHub, Slack, Jira, filesystem, git or
+            sqlite and the platform will connect to it.
           </Empty>
         )}
 
@@ -294,7 +306,9 @@ export default function Registry() {
           <>
             <SectionTitle style={{ marginTop: 0 }}>Shared servers</SectionTitle>
             <div className="grid">
-              {shared.map((s) => <ServerCard key={s.name} server={s} onRefresh={load} />)}
+              {shared.map((s) => (
+                <ServerCard key={s.name} server={s} onRefresh={load} />
+              ))}
             </div>
           </>
         )}
@@ -303,7 +317,9 @@ export default function Registry() {
           <>
             <SectionTitle>Private to {me?.company ?? "this workspace"}</SectionTitle>
             <div className="grid">
-              {priv.map((s) => <ServerCard key={s.name} server={s} onRefresh={load} />)}
+              {priv.map((s) => (
+                <ServerCard key={s.name} server={s} onRefresh={load} />
+              ))}
             </div>
           </>
         )}

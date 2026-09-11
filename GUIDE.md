@@ -15,7 +15,7 @@ Read `docs/ARCHITECTURE.md` first (plain language, why each decision), then `doc
 
 | Step | Status | What exists today | Files |
 |---|---|---|---|
-| 1 Register a tool server | ✅ done | Form: name, transport (stdio / http / sse), endpoint, auth type, shared or private. The platform connects out and calls `tools/list` — no tool is typed by hand. Read / write / destructive marking. Health job every 5 min marks dead servers `down`. Sharing with everyone = `platform_admin` only. | `app/api/routers/servers.py` · `app/registry/service.py` · `app/registry/catalogue.py` · `app/registry/health.py` · `app/runtime/mcp_client.py` (transports + `classify_risk`) · `app/models/tenant.py` (`McpServer`, `McpTool`) · `app/models/platform_.py` (`SharedServer`, `SharedTool`) · `web/src/pages/Registry.jsx` · `mcp/local_slack/server.py` |
+| 1 Register a tool server | ✅ done | Form: name, transport (stdio / http / sse), endpoint, auth type, shared or private. The platform connects out and calls `tools/list` — no tool is typed by hand. Read / write / destructive marking. Health job every 5 min marks dead servers `down`. Sharing with everyone = `platform_admin` only. | `app/api/routers/servers.py` · `app/registry/service.py` · `app/registry/catalogue.py` · `app/registry/health.py` · `app/runtime/mcp_client.py` (transports + `classify_risk`) · `app/models/tenant.py` (`McpServer`, `McpTool`) · `app/models/platform_.py` (`SharedServer`, `SharedTool`) · `web/src/pages/Registry.jsx` |
 | 2 Connect to it | ✅ done | AES-256-GCM envelope encryption, per-row data key, AAD = tenant + server. No endpoint returns a secret; the UI shows dots. A test stores a sentinel token and greps every table in every schema for it. | `app/vault/envelope.py` · `app/vault/service.py` · `app/vault/resolver.py` · `app/api/routers/connections.py` · `app/models/tenant.py` (`Connection`) · `web/src/pages/Connections.jsx` |
 | 3 Describe an agent | ✅ except score | Builder graph with two LangGraph interrupts (`select_tools`, `missing_connection`); survives `docker compose restart api`; form mode drives the *same* graph. **No score shown yet.** | `app/builder/schema.py` (`AgentConfig`) · `app/builder/graph.py` · `app/api/routers/builds.py` · `app/tenancy/checkpointers.py` · `web/src/pages/Build.jsx` |
 | 4 Test it | ⚠️ half | Agent page, graph drawn from the stored config, tools + approval table, raw configuration JSON. **No playground, no runs, no scores, no API tab.** | done: `app/api/routers/agents.py` · `app/runtime/compiler.py` · `app/runtime/guarded_tool.py` · `app/runtime/models.py` · `web/src/pages/MyAgents.jsx` · `web/src/pages/AgentDetail.jsx` — pending: `app/api/routers/runs.py`, `app/scoring/`, Playground/Runs tabs in `AgentDetail.jsx` |
@@ -47,7 +47,7 @@ Cross-cutting, already done: `app/core/db.py` + `app/api/deps.py` (tenant gate),
 
 - `uv run pytest -q` → **118 passed, 1 skipped** (the skip is the opt-in live-model test).
 - `cd web && npm run build` → clean.
-- `docker compose up -d --build` → 5 containers up (`db`, `api`, `web`, `local_slack`, `pgadmin`).
+- `docker compose up -d --build` → 4 containers up (`db`, `api`, `web`, `pgadmin`).
 - Dead code, scratch files and the `slug` naming were cleaned up on 11 Sep. `tenants.slug` is the
   one deliberate slug left: it is the key that becomes the schema name.
 - **Nothing is committed yet.** First action for whoever reads this: `git add -A && git commit`.
@@ -102,7 +102,6 @@ $ docker compose ps --format "table {{.Service}}\t{{.Status}}"
 SERVICE       STATUS
 api           Up ...
 db            Up ... (healthy)
-local_slack   Up ...
 pgadmin       Up ...
 web           Up ...
 
@@ -115,9 +114,8 @@ $ curl localhost:8000/health
 | <http://localhost:5173> | the product (React + Vite) | sign up — first signup ever becomes `platform_admin` |
 | <http://localhost:8000/docs> | FastAPI Swagger | cookie from the UI, or paste the JWT |
 | <http://localhost:5050> | pgAdmin (the database, in a browser) | `admin@forge.dev` / `admin`; server `forge` is pre-registered |
-| <http://localhost:9001/mcp> | our own MCP server (`local_slack`) | Bearer token starting `xoxb-` |
 
-Code under `app/`, `mcp/` and `web/src/` is volume-mounted: edit locally, the containers reload.
+Code under `app/` and `web/src/` is volume-mounted: edit locally, the containers reload.
 Rebuild (`--build`) only when `pyproject.toml`, `Dockerfile` or `web/package.json` change.
 
 ### When the models change
@@ -146,16 +144,21 @@ form-vs-chat invariant and the CI check that no query ever schema-qualifies a te
 
 1. **Sign up** at <http://localhost:5173> — company `Northwind Labs`, any email/password.
    A schema `t_northwind_labs` is created for you at that moment.
-2. **MCP Registry** → paste an address, or use a quick pick:
-   - `local_slack` — transport `http`, endpoint `http://local_slack:9001/mcp`, auth `api_key`.
-     3 tools: `read_channel` (read), `post_message` (write), `delete_message` (destructive).
-   - `github` — quick pick; launches `npx -y @modelcontextprotocol/server-github`, the official
-     public server. 26 tools discovered live over `tools/list`.
-   - `filesystem`, `git`, `memory`, `fetch`, `time` — the official reference servers.
+2. **MCP Registry** → paste an address, or click a quick pick. All six are the vendors' own servers:
+   - `filesystem`, `git`, `sqlite` — the reference servers, launched over stdio inside the `api`
+     container (`/srv/workspace`, `/srv/var/forge.sqlite`). No credential. Register and they are
+     usable immediately: 14, 12 and 6 tools respectively, straight from `tools/list`.
+   - `github` — `https://api.githubcopilot.com/mcp/`, GitHub's remote server. It answers 401 to an
+     anonymous `tools/list`, so the form asks for a PAT, discovers the tools with it, and saves it
+     encrypted as your connection in the same click.
+   - `slack` — `https://mcp.slack.com/mcp`, Slack's remote server. Needs a user OAuth token
+     (`xoxp-…`) from a Slack app installed to your workspace.
+   - `jira` — `https://mcp.atlassian.com/v2/mcp`, Atlassian's remote server. Needs a scoped API
+     token, and your org admin must have enabled API-token auth for the Rovo MCP server.
    The platform connects out, calls `tools/list`, and stores what came back. Nobody types a tool in.
-   A `platform_admin` can tick **shared with everyone**; anyone can register **private**.
-3. **Connections** → `github` → paste a GitHub PAT (`repo` scope). For `local_slack`, any token
-   starting `xoxb-` (e.g. `xoxb-team-demo`). It is encrypted before it touches the database.
+   A `platform_admin` can tick **Everyone**; anyone can register **Just my workspace**.
+3. **Connections** → a credential for any server you registered without one. Encrypted before it
+   touches the database; the list shows dots, never the value.
 4. **Build** → *"read my open GitHub issues and post a summary to Slack"*. The build pauses twice
    (pick tools, missing connection). Kill the API mid-pause — `docker compose restart api` — and
    reload the page: the same question is still there (check 5).
@@ -227,7 +230,6 @@ app/
   tenancy/    provision.py (create/drop schema), checkpointers.py (per-tenant AsyncPostgresSaver)
   vault/      envelope.py (the only place plaintext exists), service.py, resolver.py
   server.py   FastAPI app, lifespan (bootstrap platform schema, start health sweep)
-mcp/local_slack/   our own MCP server - a real write tool with a real token, over stdio or HTTP
 web/src/           React + Vite: pages/ (SignIn, Registry, Connections, Build, MyAgents, AgentDetail)
 scripts/           reset_db.py · inspect_db.py · run_agent.py (run a config from the terminal)
 tests/             graded/ (one file per implemented check) · fixtures/ (two sample configs)

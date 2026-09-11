@@ -28,10 +28,6 @@ class Settings(BaseSettings):
     # real one in .env. Generate: app.vault.envelope.generate_master_key()
     forge_master_key: str = "EvJlOzROmUa41BJZvHIoDVDIrBNyuNcaMuu0VOEfYDA="
 
-    # --- credentials for local MCP servers -----------------------------------
-    # Stands in for the vault until step 6 encrypts these properly.
-    local_slack_token: str | None = None
-
 
 settings = Settings()
 

@@ -4,23 +4,25 @@
     uv run python scripts/run_agent.py --reject         # refuse it
     uv run python scripts/run_agent.py --no-connection  # prove it degrades
     uv run python scripts/run_agent.py --ask            # you type the decision
-    uv run python scripts/run_agent.py --tenant=northwind_labs   # token from the VAULT
+    uv run python scripts/run_agent.py --tenant=northwind_labs   # endpoints + token from the workspace
 
 What this proves, all of it real:
 
     * a config document compiles into a working LangGraph
     * a MODEL supervisor delegates to two MODEL specialists
     * tools are discovered and called over the real MCP protocol
+      (the reference filesystem server, confined to a scratch directory)
     * a WRITE tool stops the run dead and waits for a human
-    * the credential is fetched for one call and dropped
     * nothing decrypted is ever in graph state
+
+Needs GOOGLE_API_KEY (or GROQ_API_KEY) in .env, and npx on PATH.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
+import tempfile
 from pathlib import Path
 
 if sys.platform == "win32":  # psycopg / anyio need the selector loop on Windows
@@ -30,22 +32,14 @@ from langgraph.checkpoint.memory import InMemorySaver  # noqa: E402
 from langgraph.types import Command  # noqa: E402
 
 from app.builder.schema import AgentConfig  # noqa: E402
-from app.core.config import settings  # noqa: E402
 from app.runtime.compiler import compile_agent  # noqa: E402
 from app.runtime.guarded_tool import RunContext  # noqa: E402
-from app.vault.resolver import (
-    catalogue_endpoints,
-    registry_endpoints,
-    static_resolver,
-    vault_resolver,
-)  # noqa: E402
+from app.runtime.mcp_client import Endpoint  # noqa: E402
+from app.vault.resolver import registry_endpoints, static_resolver, vault_resolver  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT / "tests" / "fixtures" / "standup_digest.json"
-CHANNEL = "#eng-standup"
-
-#: Stands in for the vault (step 6). Slug -> that tenant's own token.
-CONNECTIONS = {"local_slack": settings.local_slack_token or "xoxb-demo-token"}
+CONFIG = ROOT / "tests" / "fixtures" / "docs_freshness.json"
+HANDBOOK = "## Setup\nRun scripts/old_setup.sh, then open http://wiki.internal/onboarding.\n"
 
 
 def rule(title: str) -> None:
@@ -60,21 +54,31 @@ async def main() -> int:
 
     cfg = AgentConfig.model_validate_json(CONFIG.read_text(encoding="utf-8"))
 
-    # --tenant runs against a real workspace, so the token comes out of the
-    # vault exactly as it does in the product. Without it, the script uses .env
-    # so it still works with no database.
+    # Without --tenant there is no registry, so launch the filesystem server on
+    # a scratch directory here. Declared api_key purely so --no-connection has
+    # a credential to withhold; the server itself needs none.
+    scratch = Path(tempfile.mkdtemp(prefix="forge-"))
+    (scratch / "handbook.md").write_text(HANDBOOK, encoding="utf-8")
+    local = Endpoint.parse(
+        "stdio", f"npx -y @modelcontextprotocol/server-filesystem {scratch}",
+        token_env="FORGE_DEMO_TOKEN", auth_type="api_key",
+    )
+
+    async def local_endpoints(_name: str) -> Endpoint | None:
+        return local
+
     if no_conn:
-        resolve = static_resolver({})              # models a revoked connection
+        resolve = static_resolver({})  # models a revoked connection
     elif tenant:
         resolve = vault_resolver(tenant)
     else:
-        resolve = static_resolver(CONNECTIONS)
+        resolve = static_resolver({"filesystem": "demo-token"})
 
     ctx = RunContext(
         tenant_id=tenant or "local",
         thread_id="run-1",
         resolve_token=resolve,
-        resolve_endpoint=registry_endpoints(tenant) if tenant else catalogue_endpoints(),
+        resolve_endpoint=registry_endpoints(tenant) if tenant else local_endpoints,
     )
 
     rule(f"COMPILING  {cfg.name}   fingerprint {cfg.fingerprint()}")
@@ -82,15 +86,16 @@ async def main() -> int:
     print(f"  shape       {cfg.topology.type} -> {cfg.topology.supervisor.delegates_to}")
     print(f"  tools       {', '.join(t.ref for t in cfg.tools)}")
     print(f"  guarded     {', '.join(t.ref for t in cfg.guarded_tools) or 'none'}")
-    print(f"  credential  {'vault (' + tenant + ')' if tenant else '.env'}")
-    print("\n  (asking each MCP server for its real tool schemas...)")
+    print(f"  workspace   {'registry of ' + tenant if tenant else scratch}")
+    print("\n  (asking the MCP server for its real tool schemas...)")
 
     graph = await compile_agent(cfg, ctx, checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": ctx.thread_id}}
 
     rule("RUNNING  (every line below is a real model call)")
     state: dict | Command = {
-        "task": f"Summarise yesterday's standup in {CHANNEL}, blockers first, and post it back to {CHANNEL}.",
+        "task": "Read handbook.md, find every section that references a script, path or "
+        "URL that may be stale, and write a short report to report.md.",
         "transcript": [],
         "finished": [],
         "results": {},
@@ -114,7 +119,7 @@ async def main() -> int:
         for k, v in payload["args"].items():
             preview = " ".join(str(v).split())
             print(f"  arg    {k} = {preview[:60]}{'...' if len(preview) > 60 else ''}")
-        print("\n  Nothing has been sent. The run is parked on an interrupt.")
+        print("\n  Nothing has been written. The run is parked on an interrupt.")
         print("  Restart the process here and it would still be waiting.")
 
         if ask:
@@ -129,13 +134,10 @@ async def main() -> int:
         head = " ".join(str(out).split())
         print(f"  {ref:28} -> {head[:60]}")
 
-    store = ROOT / "var" / "local_slack.json"
-    if store.exists() and not no_conn and not reject:
-        posted = json.loads(store.read_text(encoding="utf-8")).get(CHANNEL, [])
-        bot = [m for m in posted if m.get("user") == "issue-digest-bot"]
-        if bot:
-            rule(f"THE MESSAGE REALLY LANDED  ({store.relative_to(ROOT)})")
-            print("  " + bot[-1]["text"].replace("\n", "\n  "))
+    report = scratch / "report.md"
+    if report.exists():
+        rule(f"THE FILE REALLY LANDED  ({report})")
+        print("  " + report.read_text(encoding="utf-8").replace("\n", "\n  "))
     print()
     return 0
 

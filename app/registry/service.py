@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.platform_ import SharedServer, SharedTool
 from app.models.tenant import Connection, McpServer, McpTool
-from app.runtime.mcp_client import DiscoveredTool, Endpoint, list_tools
+from app.runtime.mcp_client import AuthRequired, DiscoveredTool, Endpoint, list_tools
 
 log = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ async def list_servers(session: AsyncSession) -> list[ServerView]:
     return sorted(views.values(), key=lambda v: v.name)
 
 
-async def connected_slugs(session: AsyncSession) -> set[str]:
+async def connected_servers(session: AsyncSession) -> set[str]:
     rows = await session.scalars(select(Connection).where(Connection.status == "active"))
     return {c.server_name for c in rows}
 
@@ -97,16 +97,22 @@ async def endpoint_for(session: AsyncSession, name: str) -> Endpoint | None:
         row = await session.scalar(select(SharedServer).where(SharedServer.name == name))
     if row is None:
         return None
-    return Endpoint.parse(row.transport, row.endpoint, row.token_env)
+    return Endpoint.parse(row.transport, row.endpoint, row.token_env, row.auth_type)
 
 
 # -------------------------------------------------------------------- write
 
 
 async def discover(ep: Endpoint, token: str | None) -> list[DiscoveredTool]:
-    """Connect and ask. Raises ServerUnreachable rather than returning nothing."""
+    """Connect and ask. Raises rather than returning nothing.
+
+    AuthRequired passes straight through: the server is alive, it just wants a
+    credential first. Everything else collapses to ServerUnreachable.
+    """
     try:
         found = await list_tools(ep, token=token)
+    except AuthRequired:
+        raise
     except Exception as exc:  # noqa: BLE001 - any failure means "do not save"
         raise ServerUnreachable(f"could not reach {ep.display}: {type(exc).__name__}") from exc
     if not found:
@@ -132,7 +138,7 @@ async def register(
     `scope="shared"` writes to platform.mcp_servers instead of this company's
     schema. The router only allows that for admins.
     """
-    ep = Endpoint.parse(transport, endpoint, token_env)
+    ep = Endpoint.parse(transport, endpoint, token_env, auth_type)
     discovered = await discover(ep, token)
     now = datetime.now(timezone.utc)
 
@@ -192,9 +198,14 @@ async def refresh(
         raise KeyError(name)
 
     server.last_checked_at = datetime.now(timezone.utc)
-    ep = Endpoint.parse(server.transport, server.endpoint, server.token_env)
+    ep = Endpoint.parse(server.transport, server.endpoint, server.token_env, server.auth_type)
     try:
         discovered = await discover(ep, token)
+    except AuthRequired:
+        # It answered. A 401 from a server we hold no token for is "alive",
+        # which is what this check is for; the tool list stays as last seen.
+        server.status = "ok"
+        return "ok"
     except ServerUnreachable:
         server.status = "down"
         return "down"

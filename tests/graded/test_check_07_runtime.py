@@ -27,11 +27,11 @@ from langgraph.types import Command
 from app.builder.schema import AgentConfig
 from app.runtime.compiler import compile_agent
 from app.runtime.guarded_tool import RunContext, redact
-from app.vault.resolver import catalogue_endpoints
+from app.runtime.mcp_client import Endpoint
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIG = ROOT / "tests" / "fixtures" / "standup_digest.json"
-CHANNEL = "#eng-standup"
+CONFIG = ROOT / "tests" / "fixtures" / "docs_freshness.json"
+REPORT = "report.md"
 
 #: The sentinel a grader would plant. It must appear nowhere we persist.
 TOKEN = "xoxb-GRADER-TOKEN-DO-NOT-LEAK"
@@ -61,7 +61,7 @@ class FakeChat:
         # No tools bound => this is the supervisor, routing the work.
         if not self.bound:
             human = str(messages[1].content)
-            for name in ("reader", "poster"):
+            for name in ("reader", "writer"):
                 if f"- {name}:" in human:
                     return AIMessage(name)
             return AIMessage("done")
@@ -72,9 +72,10 @@ class FakeChat:
             return AIMessage("done")
 
         fn = self.bound[0]["function"]["name"]
-        args: dict = {"channel": CHANNEL}
-        if "post_message" in fn:
-            args["text"] = "digest body"
+        if "write_file" in fn:
+            args: dict = {"path": REPORT, "content": "digest body"}
+        else:
+            args = {"path": "handbook.md"}
         return AIMessage("", tool_calls=[{"name": fn, "args": args, "id": "call-1"}])
 
 
@@ -85,11 +86,16 @@ def fake_model(monkeypatch):
 
 
 @pytest.fixture
-def store(tmp_path, monkeypatch) -> Path:
-    """Point local_slack at a throwaway file so tests never touch var/."""
-    path = tmp_path / "slack.json"
-    monkeypatch.setenv("LOCAL_SLACK_STORE", str(path))
-    return path
+def store(tmp_path) -> Path:
+    """A throwaway directory the reference filesystem server is confined to.
+
+    The agent under test reads handbook.md from it and, once approved, writes
+    report.md into it. "Did the write tool run?" is then a file existing.
+    """
+    (tmp_path / "handbook.md").write_text(
+        "## Setup\nrun scripts/old_setup.sh\n", encoding="utf-8"
+    )
+    return tmp_path
 
 
 @pytest.fixture
@@ -97,12 +103,30 @@ def config() -> AgentConfig:
     return AgentConfig.model_validate_json(CONFIG.read_text(encoding="utf-8"))
 
 
-async def build(config: AgentConfig, *, token: str | None = TOKEN):
-    async def resolve(_slug):
+def filesystem_endpoints(root: Path):
+    """The REAL @modelcontextprotocol/server-filesystem, confined to `root`.
+
+    Declared api_key so the token path is exercised: the platform passes the
+    credential to the subprocess as an env var, the server ignores it, and the
+    tests then prove it went nowhere else.
+    """
+    ep = Endpoint.parse(
+        "stdio", f"npx -y @modelcontextprotocol/server-filesystem {root}",
+        token_env="FORGE_TEST_TOKEN", auth_type="api_key",
+    )
+
+    async def resolve(_server_name: str) -> Endpoint | None:
+        return ep
+
+    return resolve
+
+
+async def build(config: AgentConfig, *, token: str | None = TOKEN, root: Path):
+    async def resolve(_server_name):
         return token
 
     ctx = RunContext(tenant_id="alpha", thread_id="t-1", resolve_token=resolve,
-                     resolve_endpoint=catalogue_endpoints())
+                     resolve_endpoint=filesystem_endpoints(root))
     saver = InMemorySaver()
     graph = await compile_agent(config, ctx, checkpointer=saver)
     return graph, saver, {"configurable": {"thread_id": "t-1"}}
@@ -115,80 +139,76 @@ START_STATE = {"task": "summarise", "transcript": [], "finished": [], "results":
 
 
 async def test_supervisor_delegates_to_both_specialists(config, store):
-    graph, _, cfg = await build(config)
+    graph, _, cfg = await build(config, root=store)
     await graph.ainvoke(START_STATE, config=cfg)
     result = await graph.ainvoke(Command(resume="approve"), config=cfg)
 
-    assert set(result["finished"]) == {"reader", "poster"}
+    assert set(result["finished"]) == {"reader", "writer"}
     assert "[supervisor] -> reader" in result["transcript"]
-    assert "[supervisor] -> poster" in result["transcript"]
+    assert "[supervisor] -> writer" in result["transcript"]
 
 
 async def test_a_specialist_is_only_given_its_own_tools(config, store):
-    """reader must not be able to post, whatever the model decides to try."""
-    graph, _, _ = await build(config)
+    """reader must not be able to write, whatever the model decides to try."""
+    graph, _, _ = await build(config, root=store)
     reader = config.topology.specialists[0]
-    assert reader.tools == ["local_slack.read_channel"]
-    assert "local_slack.post_message" not in reader.tools
+    assert reader.tools == ["filesystem.read_text_file"]
+    assert "filesystem.write_file" not in reader.tools
 
 
 # --------------------------------------------- rule 4: the platform enforces it
 
 
 async def test_a_write_tool_stops_the_run_before_executing(config, store):
-    graph, _, cfg = await build(config)
+    graph, _, cfg = await build(config, root=store)
     result = await graph.ainvoke(START_STATE, config=cfg)
 
     assert "__interrupt__" in result, "the write tool did not pause"
     payload = result["__interrupt__"][0].value
-    assert payload["tool"] == "local_slack.post_message"
+    assert payload["tool"] == "filesystem.write_file"
     assert payload["risk"] == "write"
 
-    # and crucially: nothing was posted while it waits
-    posted = json.loads(store.read_text()).get(CHANNEL, []) if store.exists() else []
-    assert not any(m["text"] == "digest body" for m in posted)
+    # and crucially: nothing was written while it waits
+    assert not (store / REPORT).exists()
 
 
 async def test_approving_resumes_and_the_tool_really_runs(config, store):
-    graph, _, cfg = await build(config)
+    graph, _, cfg = await build(config, root=store)
     await graph.ainvoke(START_STATE, config=cfg)
     result = await graph.ainvoke(Command(resume="approve"), config=cfg)
 
     assert "__interrupt__" not in result
-    posted = json.loads(store.read_text())[CHANNEL]
-    assert any(m["text"] == "digest body" for m in posted)
+    assert (store / REPORT).read_text(encoding="utf-8") == "digest body"
 
 
 async def test_rejecting_means_the_tool_never_runs(config, store):
-    graph, _, cfg = await build(config)
+    graph, _, cfg = await build(config, root=store)
     await graph.ainvoke(START_STATE, config=cfg)
     result = await graph.ainvoke(Command(resume="reject"), config=cfg)
 
-    assert "Rejected by the user" in result["results"]["local_slack.post_message"]
+    assert "Rejected by the user" in result["results"]["filesystem.write_file"]
 
-    # Nothing was written at all - the store file was never even created, because
-    # the only tool that writes never executed.
-    posted = json.loads(store.read_text()).get(CHANNEL, []) if store.exists() else []
-    assert not any(m["text"] == "digest body" for m in posted)
+    # Nothing was written at all: the only tool that writes never executed.
+    assert not (store / REPORT).exists()
 
 
 async def test_read_tools_are_not_gated(config, store):
     """Only write/destructive pause. A read tool must run straight through."""
-    graph, _, cfg = await build(config)
+    graph, _, cfg = await build(config, root=store)
     result = await graph.ainvoke(START_STATE, config=cfg)
     assert "reader" in result["finished"]
-    assert "local_slack.read_channel" in result["results"]
+    assert "old_setup.sh" in result["results"]["filesystem.read_text_file"]
 
 
 # ------------------------------------- rule: degraded, not crashed (Connections)
 
 
 async def test_a_missing_connection_degrades_instead_of_crashing(config, store):
-    graph, _, cfg = await build(config, token=None)  # nothing connected here
+    graph, _, cfg = await build(config, token=None, root=store)  # nothing connected here
     await graph.ainvoke(START_STATE, config=cfg)
     result = await graph.ainvoke(Command(resume="approve"), config=cfg)
 
-    assert set(result["finished"]) == {"reader", "poster"}  # it still finished
+    assert set(result["finished"]) == {"reader", "writer"}  # it still finished
     tool_outputs = [v for k, v in result["results"].items() if "." in k and "summary" not in k]
     assert tool_outputs and all("not connected" in v for v in tool_outputs)
 
@@ -202,7 +222,7 @@ async def test_the_credential_never_reaches_graph_state(config, store):
     A token in state would therefore be a token on disk, permanently - in a
     table nobody remembers to search. So we search it here.
     """
-    graph, saver, cfg = await build(config)
+    graph, saver, cfg = await build(config, root=store)
     await graph.ainvoke(START_STATE, config=cfg)
     await graph.ainvoke(Command(resume="approve"), config=cfg)
 
@@ -213,7 +233,7 @@ async def test_the_credential_never_reaches_graph_state(config, store):
 
 async def test_the_approval_payload_shows_no_secrets(config, store):
     """What the human is shown is also what gets checkpointed."""
-    graph, _, cfg = await build(config)
+    graph, _, cfg = await build(config, root=store)
     result = await graph.ainvoke(START_STATE, config=cfg)
     assert TOKEN not in json.dumps(result["__interrupt__"][0].value)
 
@@ -227,9 +247,9 @@ def test_redact_masks_sensitive_argument_names():
 
 def test_run_context_carries_a_resolver_not_a_token():
     """RunContext holds a callable, so no credential is ever an attribute."""
-    async def resolve(_slug):
+    async def resolve(_server_name):
         return TOKEN
 
     ctx = RunContext(tenant_id="alpha", thread_id="t", resolve_token=resolve,
-                     resolve_endpoint=catalogue_endpoints())
+                     resolve_endpoint=filesystem_endpoints(Path(".")))
     assert TOKEN not in json.dumps({"tenant_id": ctx.tenant_id, "thread_id": ctx.thread_id})

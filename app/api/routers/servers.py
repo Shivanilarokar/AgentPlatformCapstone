@@ -21,6 +21,8 @@ from app.api.deps import NOT_FOUND, current_user, require_admin, tenant_db
 from app.core.security import Claims
 from app.registry import health, service
 from app.registry.catalogue import CATALOGUE
+from app.runtime.mcp_client import AuthRequired
+from app.vault import service as vault
 
 router = APIRouter(prefix="/v1/servers", tags=["registry"])
 
@@ -54,6 +56,7 @@ class CatalogueOut(BaseModel):
     auth_type: str
     token_env: str | None
     description: str
+    credential_hint: str
     homepage: str
 
 
@@ -70,8 +73,9 @@ class RegisterIn(BaseModel):
     description: str = Field(default="", max_length=500)
     #: "private" = just my workspace. "shared" = everyone; admins only.
     visibility: str = Field(default="private", pattern=r"^(private|shared)$")
-    #: Some servers refuse to list their tools without one. Used for this call
-    #: only - storing it is the Connections screen's job.
+    #: The remote servers (GitHub, Slack, Atlassian) refuse to list their tools
+    #: without one. When given, it is used for discovery and then saved -
+    #: encrypted - as this workspace's connection, so "Connect & save" means both.
     token: str | None = None
 
 
@@ -85,7 +89,9 @@ def _out(v: service.ServerView, connected: set[str]) -> ServerOut:
         status=v.status,
         scope=v.scope,
         shared_by=v.shared_by,
-        connected=v.name in connected,
+        # "connected" means an agent here can use it: a stored credential, or
+        # a server that never needed one.
+        connected=v.name in connected or v.auth_type == "none",
         last_checked_at=v.last_checked_at.isoformat() if v.last_checked_at else None,
         tools=[
             ToolOut(name=t.name, description=t.description, risk=t.risk)
@@ -96,21 +102,18 @@ def _out(v: service.ServerView, connected: set[str]) -> ServerOut:
 
 @router.get("", response_model=list[ServerOut])
 async def list_servers(db: AsyncSession = Depends(tenant_db)):
-    connected = await service.connected_slugs(db)
+    connected = await service.connected_servers(db)
     return [_out(v, connected) for v in await service.list_servers(db)]
 
 
 @router.get("/catalogue", response_model=list[CatalogueOut])
 async def catalogue():
-    """Real open-source MCP servers the platform can launch. Pre-fills the form.
-
-    In a hosted product you would only ever paste an address. Here these exist
-    so a clean `docker compose up` has something to register on screen one.
-    """
+    """The vendors' own MCP servers, as addresses. Pre-fills the form, nothing more."""
     return [
         CatalogueOut(
-            name=s.name, transport="stdio", endpoint=s.endpoint, auth_type=s.auth_type,
-            token_env=s.token_env, description=s.description, homepage=s.homepage,
+            name=s.name, transport=s.transport, endpoint=s.endpoint, auth_type=s.auth_type,
+            token_env=s.token_env, description=s.description,
+            credential_hint=s.credential_hint, homepage=s.homepage,
         )
         for s in CATALOGUE.values()
     ]
@@ -140,22 +143,36 @@ async def register_server(
         )
     except ValueError as exc:  # a malformed endpoint
         raise HTTPException(422, detail={"error": "bad_endpoint", "detail": str(exc)}) from None
+    except AuthRequired as exc:
+        # Alive, but it will not list its tools anonymously. The form shows a
+        # credential field and the user tries again with one.
+        raise HTTPException(401, detail={"error": "auth_required", "detail": str(exc)}) from None
     except service.ServerUnreachable as exc:
         # Nothing was saved. A registry entry with an unverified tool list would
         # be worse than no entry at all.
         raise HTTPException(422, detail={"error": "unreachable", "detail": str(exc)}) from None
 
-    return _out(view, await service.connected_slugs(db))
+    if body.token:
+        # Discovery worked with it, so it is this workspace's connection now.
+        # Encrypted on the way in; the plaintext leaves scope with this request.
+        await vault.add(db, tenant=claims.tenant_slug, server_name=body.name,
+                        secret=body.token, added_by=claims.email)
+
+    return _out(view, await service.connected_servers(db))
 
 
 @router.post("/{name}/refresh", response_model=ServerOut)
-async def refresh_server(name: str, token: str | None = None, db: AsyncSession = Depends(tenant_db)):
+async def refresh_server(
+    name: str, claims: Claims = Depends(current_user), db: AsyncSession = Depends(tenant_db)
+):
+    """Re-check now, with this workspace's own credential if it has one."""
+    token = await vault.use(db, tenant=claims.tenant_slug, server_name=name)
     try:
         await service.refresh(db, name, token=token)
     except KeyError:
         raise HTTPException(404, detail=NOT_FOUND) from None
     await db.flush()
-    connected = await service.connected_slugs(db)
+    connected = await service.connected_servers(db)
     view = next((v for v in await service.list_servers(db) if v.name == name), None)
     if view is None:
         raise HTTPException(404, detail=NOT_FOUND)

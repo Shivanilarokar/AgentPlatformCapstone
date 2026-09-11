@@ -22,7 +22,7 @@ from app.vault import envelope, service
 #: The token a grader would hand us.
 SENTINEL = "xoxb-GRADER-9f2a-DO-NOT-LEAK-4c81"
 TENANT = "vaulttest"
-SERVER = "local_slack"
+SERVER = "slack"
 
 
 @pytest.fixture
@@ -156,7 +156,7 @@ def test_the_list_response_carries_only_metadata(workspace_free=None):
     from app.api.routers.connections import ConnectionOut
 
     dumped = json.dumps(ConnectionOut(
-        server_name="local_slack", status="active", added_by="a@b.example",
+        server_name="slack", status="active", added_by="a@b.example",
         created_at="2026-01-01T00:00:00", last_used_at=None,
     ).model_dump())
     assert SENTINEL not in dumped

@@ -43,7 +43,7 @@ def test_it_is_a_real_multi_agent_system():
 def test_the_write_tool_is_behind_an_approval():
     cfg = AgentConfig.model_validate(RAW)
     guarded = [t.ref for t in cfg.guarded_tools]
-    assert guarded == ["local_slack.post_message"]
+    assert guarded == ["slack.slack_send_message"]
 
 
 def test_fingerprint_is_stable_and_content_addressed():
@@ -63,7 +63,7 @@ def test_the_graph_picture_is_derived_from_the_card():
     assert {"supervisor", "triager", "reporter"} <= ids
     assert {"from": "supervisor", "to": "triager"} in graph["edges"]
 
-    slack = next(n for n in graph["nodes"] if n["id"] == "local_slack.post_message")
+    slack = next(n for n in graph["nodes"] if n["id"] == "slack.slack_send_message")
     assert slack["risk"] == "write" and slack["approval"] == "ask"
 
 
@@ -72,7 +72,7 @@ def test_the_graph_picture_is_derived_from_the_card():
 
 def test_a_write_tool_cannot_declare_itself_auto():
     broken = load()
-    broken["tools"][2]["approval"] = "auto"  # local_slack.post_message
+    broken["tools"][2]["approval"] = "auto"  # slack.slack_send_message
     with pytest.raises(ValidationError, match="approval must be 'ask'"):
         AgentConfig.model_validate(broken)
 
@@ -98,13 +98,13 @@ def test_the_registry_overrules_the_config():
     registry = {  # what the MCP server actually reported
         "github.list_issues": Risk.READ,
         "github.get_issue": Risk.READ,
-        "local_slack.post_message": Risk.WRITE,
+        "slack.slack_send_message": Risk.WRITE,
     }
     violations = cfg.enforce_approvals(registry)
 
     assert any("registry says" in v for v in violations)
     assert any("without approval" in v for v in violations)
-    posted = next(t for t in cfg.tools if t.ref == "local_slack.post_message")
+    posted = next(t for t in cfg.tools if t.ref == "slack.slack_send_message")
     assert posted.risk is Risk.WRITE
     assert posted.approval is Approval.ASK  # corrected regardless
 
@@ -139,19 +139,19 @@ def test_requires_connection_is_a_slug_not_a_secret():
     """
     cfg = AgentConfig.model_validate(RAW)
     for tool in cfg.tools:
-        assert tool.requires_connection in {"github", "local_slack"}
+        assert tool.requires_connection in {"github", "slack"}
         assert "://" not in tool.requires_connection
         assert "-" not in tool.requires_connection  # not a uuid
 
 
 def test_requires_connections_must_match_the_granted_tools():
-    broken = load(requires_connections=["github"])  # forgot local_slack
+    broken = load(requires_connections=["github"])  # forgot slack
     with pytest.raises(ValidationError, match="requires_connections must be"):
         AgentConfig.model_validate(broken)
 
 
 def test_a_connection_cannot_be_requested_that_no_tool_needs():
-    broken = load(requires_connections=["github", "local_slack", "jira"])
+    broken = load(requires_connections=["github", "slack", "jira"])
     with pytest.raises(ValidationError, match="requires_connections must be"):
         AgentConfig.model_validate(broken)
 
