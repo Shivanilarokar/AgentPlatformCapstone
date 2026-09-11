@@ -1,0 +1,101 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: forge
+      POSTGRES_PASSWORD: forge
+      POSTGRES_DB: forge
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Plain depends_on only waits for the CONTAINER to start, not for Postgres
+      # to accept connections. Without this the API crashes on boot ~half the time.
+      test: ["CMD-SHELL", "pg_isready -U forge -d forge"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: .
+    # Model provider keys and the vault master key live in .env, which is
+    # gitignored. `required: false` keeps a fresh clone working without one.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # "db" is the service name above - Docker's DNS resolves it to that container.
+      DATABASE_URL: postgresql+psycopg://forge:forge@db:5432/forge
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/srv/app          # edit locally, --reload picks it up, no rebuild
+      - ./mcp:/srv/mcp          # the MCP servers the platform launches
+      - forge_var:/srv/var      # where local_slack keeps its messages
+      - forge_workspace:/srv/workspace   # what the filesystem server may touch
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # The React UI. Vite's dev server proxies /auth and /v1 through to the api
+  # service, so the browser stays on ONE origin - no CORS, and the auth cookie
+  # is sent with every request.
+  web:
+    build: ./web
+    environment:
+      API_URL: http://api:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./web/src:/srv/src            # edit locally, hot reload picks it up
+      - ./web/index.html:/srv/index.html
+      - ./web/vite.config.js:/srv/vite.config.js
+      - /srv/node_modules             # keep the container's node_modules
+    depends_on:
+      - api
+
+  # Our own MCP server, over HTTP, so there is a real ADDRESS to paste into the
+  # registry: http://local_slack:9001/mcp  (from the api container's point of
+  # view - services resolve each other by name).
+  local_slack:
+    build: .
+    command: ["python", "mcp/local_slack/server.py", "--http"]
+    environment:
+      PORT: "9001"
+      LOCAL_SLACK_STORE: /srv/var/local_slack.json
+    ports:
+      - "9001:9001"
+    volumes:
+      - ./mcp:/srv/mcp
+      - forge_var:/srv/var
+
+  # Browser-based Postgres GUI. Open http://localhost:5050
+  # Login: admin@forge.dev / admin        Server password: forge
+  # NOTE: pgAdmin rejects reserved domains (.local, .test, example.com),
+  # so the address below must use a real TLD even though nobody mails it.
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@forge.dev
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"          # skip the multi-user login dance
+      PGADMIN_CONFIG_GLOBALLY_DELIVERABLE: "False" # allow non-routable admin address
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      # Pre-registers the "forge" server so there is no connection form to fill in.
+      - ./docker/pgadmin/servers.json:/pgadmin4/servers.json:ro
+      # The Postgres password, so pgAdmin connects without a prompt.
+      - ./docker/pgadmin/pgpass:/pgpass:ro
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  pgadmin_data:
+  forge_var:
+  forge_workspace:
