@@ -33,7 +33,7 @@ pytestmark = pytest.mark.skipif(
 
 async def test_a_real_model_drives_the_whole_agent(tmp_path):
     """Supervisor -> reader -> supervisor -> writer -> approval -> file written."""
-    from app.runtime.mcp_client import Endpoint
+    from app.mcp_registry.mcp_client import Endpoint
 
     (tmp_path / "handbook.md").write_text(
         "## Setup\nrun scripts/old_setup.sh\n", encoding="utf-8"

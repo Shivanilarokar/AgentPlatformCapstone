@@ -17,7 +17,7 @@ from sqlalchemy import text
 
 from app.core.db import engine, tenant_session
 from app.tenancy.provision import create_tenant, drop_tenant, bootstrap_platform
-from app.vault import envelope, service
+from app.vault import connections, envelope
 
 #: The token a grader would hand us.
 SENTINEL = "xoxb-GRADER-9f2a-DO-NOT-LEAK-4c81"
@@ -80,7 +80,7 @@ def test_an_empty_secret_is_refused():
 async def test_the_database_holds_nothing_readable(workspace):
     """THE CHECK. Store the token, then grep every column of every table."""
     async with tenant_session(TENANT) as s:
-        await service.add(s, tenant=TENANT, server_name=SERVER, secret=SENTINEL,
+        await connections.add(s, tenant=TENANT, server_name=SERVER, secret=SENTINEL,
                           added_by="grader@example.com")
 
     found: list[str] = []
@@ -106,35 +106,35 @@ async def test_the_database_holds_nothing_readable(workspace):
 async def test_it_is_still_usable_after_all_that(workspace):
     """Encrypted is only useful if it can still be lent out for one call."""
     async with tenant_session(TENANT) as s:
-        await service.add(s, tenant=TENANT, server_name=SERVER, secret=SENTINEL)
+        await connections.add(s, tenant=TENANT, server_name=SERVER, secret=SENTINEL)
 
     async with tenant_session(TENANT) as s:
-        assert await service.use(s, tenant=TENANT, server_name=SERVER) == SENTINEL
+        assert await connections.use(s, tenant=TENANT, server_name=SERVER) == SENTINEL
 
 
 async def test_a_revoked_connection_returns_none_rather_than_raising(workspace):
     """None is the DEGRADED path. The agent keeps working and reports the gap."""
     async with tenant_session(TENANT) as s:
-        await service.add(s, tenant=TENANT, server_name=SERVER, secret=SENTINEL)
+        await connections.add(s, tenant=TENANT, server_name=SERVER, secret=SENTINEL)
     async with tenant_session(TENANT) as s:
-        await service.revoke(s, SERVER)
+        await connections.revoke(s, SERVER)
 
     async with tenant_session(TENANT) as s:
-        assert await service.use(s, tenant=TENANT, server_name=SERVER) is None
+        assert await connections.use(s, tenant=TENANT, server_name=SERVER) is None
 
 
 async def test_revoking_wipes_the_ciphertext(workspace):
     async with tenant_session(TENANT) as s:
-        await service.add(s, tenant=TENANT, server_name=SERVER, secret=SENTINEL)
+        await connections.add(s, tenant=TENANT, server_name=SERVER, secret=SENTINEL)
     async with tenant_session(TENANT) as s:
-        conn = await service.revoke(s, SERVER)
+        conn = await connections.revoke(s, SERVER)
         assert conn.ciphertext == b""
         assert conn.wrapped_dek == b""
 
 
 async def test_a_server_never_connected_is_simply_absent(workspace):
     async with tenant_session(TENANT) as s:
-        assert await service.use(s, tenant=TENANT, server_name="github") is None
+        assert await connections.use(s, tenant=TENANT, server_name="github") is None
 
 
 # ------------------------------------------------------------- the API surface

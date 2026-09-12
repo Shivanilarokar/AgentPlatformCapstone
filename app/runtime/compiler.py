@@ -31,7 +31,7 @@ from langgraph.types import Command
 
 from app.builder.schema import AgentConfig, ToolSpec, TopologyType
 from app.runtime.guarded_tool import RunContext, guarded_tool
-from app.runtime.mcp_client import list_tools
+from app.mcp_registry.mcp_client import list_tools
 from app.runtime.models import chat_model, chat_model_with_tools
 
 log = logging.getLogger(__name__)

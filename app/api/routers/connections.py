@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import NOT_FOUND, current_user, tenant_db
 from app.core.security import Claims
 from app.mcp_registry.catalogue import CATALOGUE
-from app.vault import service
+from app.vault import connections
 
 router = APIRouter(prefix="/v1/connections", tags=["connections"])
 
@@ -46,7 +46,7 @@ def _out(c) -> ConnectionOut:
 
 @router.get("", response_model=list[ConnectionOut])
 async def list_connections(db: AsyncSession = Depends(tenant_db)):
-    return [_out(c) for c in await service.list_connections(db)]
+    return [_out(c) for c in await connections.list_connections(db)]
 
 
 @router.post("", response_model=ConnectionOut, status_code=201)
@@ -58,7 +58,7 @@ async def add_connection(
     if body.server_name not in CATALOGUE:
         raise HTTPException(404, detail=NOT_FOUND)
 
-    conn = await service.add(
+    conn = await connections.add(
         db,
         tenant=claims.tenant_slug,
         server_name=body.server_name,
@@ -73,7 +73,7 @@ async def add_connection(
 async def revoke_connection(server_name: str, db: AsyncSession = Depends(tenant_db)):
     """Revoke, do not delete. Agents that used it must degrade, not vanish."""
     try:
-        conn = await service.revoke(db, server_name)
+        conn = await connections.revoke(db, server_name)
     except KeyError:
         raise HTTPException(404, detail=NOT_FOUND) from None
     return _out(conn)

@@ -22,7 +22,7 @@ from typing import Any
 from langgraph.types import interrupt
 
 from app.builder.schema import Approval, ToolSpec
-from app.runtime.mcp_client import Endpoint, call_tool
+from app.mcp_registry.mcp_client import Endpoint, call_tool
 
 #: Argument names whose values must never be logged or put into graph state.
 _SENSITIVE = re.compile(r"token|secret|password|key|authorization", re.I)

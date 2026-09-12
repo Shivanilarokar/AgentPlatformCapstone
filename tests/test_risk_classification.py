@@ -8,7 +8,7 @@ against the tools of the real MCP servers this platform ships with.
 import pytest
 
 from app.builder.schema import Risk
-from app.runtime.mcp_client import classify_risk
+from app.mcp_registry.mcp_client import classify_risk
 
 # Names taken verbatim from the real servers' tools/list responses.
 CASES = [

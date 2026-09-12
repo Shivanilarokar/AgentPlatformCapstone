@@ -13,10 +13,10 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 from app.core.db import tenant_session
-from app.mcp_registry import service as registry
+from app.mcp_registry import registry
 from app.mcp_registry.catalogue import CATALOGUE
-from app.runtime.mcp_client import Endpoint
-from app.vault import service
+from app.mcp_registry.mcp_client import Endpoint
+from app.vault import connections
 
 
 def vault_resolver(tenant_slug: str) -> Callable[[str], Awaitable[str | None]]:
@@ -24,7 +24,7 @@ def vault_resolver(tenant_slug: str) -> Callable[[str], Awaitable[str | None]]:
 
     async def resolve(server_name: str) -> str | None:
         async with tenant_session(tenant_slug) as session:
-            return await service.use(session, tenant=tenant_slug, server_name=server_name)
+            return await connections.use(session, tenant=tenant_slug, server_name=server_name)
 
     return resolve
 
@@ -39,7 +39,7 @@ def static_resolver(tokens: dict[str, str]) -> Callable[[str], Awaitable[str | N
 
 
 def registry_endpoints(tenant_slug: str) -> Callable[[str], Awaitable[Endpoint | None]]:
-    """Slug -> Endpoint, from this company's registry (private first, then shared)."""
+    """Server name -> Endpoint, from this company's registry (private first, then shared)."""
 
     async def resolve(server_name: str) -> Endpoint | None:
         async with tenant_session(tenant_slug) as session:

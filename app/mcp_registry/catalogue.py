@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.runtime.mcp_client import Endpoint
+from app.mcp_registry.mcp_client import Endpoint
 
 
 @dataclass(frozen=True)

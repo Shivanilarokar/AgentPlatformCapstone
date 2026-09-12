@@ -19,10 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import NOT_FOUND, current_user, require_admin, tenant_db
 from app.core.security import Claims
-from app.mcp_registry import health, service
+from app.mcp_registry import health, registry
 from app.mcp_registry.catalogue import CATALOGUE
-from app.runtime.mcp_client import AuthRequired
-from app.vault import service as vault
+from app.mcp_registry.mcp_client import AuthRequired
+from app.vault import connections as vault
 
 router = APIRouter(prefix="/v1/servers", tags=["registry"])
 
@@ -79,7 +79,7 @@ class RegisterIn(BaseModel):
     token: str | None = None
 
 
-def _out(v: service.ServerView, connected: set[str]) -> ServerOut:
+def _out(v: registry.ServerView, connected: set[str]) -> ServerOut:
     return ServerOut(
         name=v.name,
         transport=v.transport,
@@ -102,8 +102,8 @@ def _out(v: service.ServerView, connected: set[str]) -> ServerOut:
 
 @router.get("", response_model=list[ServerOut])
 async def list_servers(db: AsyncSession = Depends(tenant_db)):
-    connected = await service.connected_servers(db)
-    return [_out(v, connected) for v in await service.list_servers(db)]
+    connected = await registry.connected_servers(db)
+    return [_out(v, connected) for v in await registry.list_servers(db)]
 
 
 @router.get("/catalogue", response_model=list[CatalogueOut])
@@ -129,7 +129,7 @@ async def register_server(
         raise HTTPException(403, detail={"error": "admin_only",
                                          "detail": "Only an admin can share a server with everyone."})
     try:
-        view = await service.register(
+        view = await registry.register(
             db,
             name=body.name,
             transport=body.transport,
@@ -147,7 +147,7 @@ async def register_server(
         # Alive, but it will not list its tools anonymously. The form shows a
         # credential field and the user tries again with one.
         raise HTTPException(401, detail={"error": "auth_required", "detail": str(exc)}) from None
-    except service.ServerUnreachable as exc:
+    except registry.ServerUnreachable as exc:
         # Nothing was saved. A registry entry with an unverified tool list would
         # be worse than no entry at all.
         raise HTTPException(422, detail={"error": "unreachable", "detail": str(exc)}) from None
@@ -158,7 +158,7 @@ async def register_server(
         await vault.add(db, tenant=claims.tenant_slug, server_name=body.name,
                         secret=body.token, added_by=claims.email)
 
-    return _out(view, await service.connected_servers(db))
+    return _out(view, await registry.connected_servers(db))
 
 
 @router.post("/{name}/refresh", response_model=ServerOut)
@@ -168,12 +168,12 @@ async def refresh_server(
     """Re-check now, with this workspace's own credential if it has one."""
     token = await vault.use(db, tenant=claims.tenant_slug, server_name=name)
     try:
-        await service.refresh(db, name, token=token)
+        await registry.refresh(db, name, token=token)
     except KeyError:
         raise HTTPException(404, detail=NOT_FOUND) from None
     await db.flush()
-    connected = await service.connected_servers(db)
-    view = next((v for v in await service.list_servers(db) if v.name == name), None)
+    connected = await registry.connected_servers(db)
+    view = next((v for v in await registry.list_servers(db) if v.name == name), None)
     if view is None:
         raise HTTPException(404, detail=NOT_FOUND)
     return _out(view, connected)

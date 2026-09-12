@@ -27,7 +27,7 @@ from langgraph.types import Command
 from app.builder.schema import AgentConfig
 from app.runtime.compiler import compile_agent
 from app.runtime.guarded_tool import RunContext, redact
-from app.runtime.mcp_client import Endpoint
+from app.mcp_registry.mcp_client import Endpoint
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "tests" / "fixtures" / "docs_freshness.json"

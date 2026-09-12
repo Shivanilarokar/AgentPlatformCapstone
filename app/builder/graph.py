@@ -36,7 +36,7 @@ from app.builder.schema import (
 )
 from app.core.db import tenant_session
 from app.models.tenant import Agent, Connection
-from app.mcp_registry import service as registry
+from app.mcp_registry import registry
 from app.runtime.models import chat_model
 
 log = logging.getLogger(__name__)

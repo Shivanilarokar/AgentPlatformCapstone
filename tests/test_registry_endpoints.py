@@ -19,12 +19,19 @@ import threading
 import pytest
 
 from app.core.db import platform_session, tenant_session
-from app.mcp_registry import service
+from app.mcp_registry import registry
 from app.mcp_registry.catalogue import spec
-from app.runtime.mcp_client import Endpoint
+from app.mcp_registry.mcp_client import Endpoint
 from app.tenancy.provision import create_tenant, drop_tenant, bootstrap_platform
 
 A, B = "regtest_a", "regtest_b"
+#: The tests share the dev database with you, so they register under their own
+#: name and only ever look at rows carrying it.
+NAME = "regtest_fs"
+
+
+def mine(views):
+    return [v for v in views if v.name == NAME]
 
 
 @pytest.fixture
@@ -128,7 +135,7 @@ def test_the_catalogue_is_just_prefilled_addresses():
 
 async def test_registering_asks_the_server_and_stores_risk(two_workspaces, filesystem):
     async with tenant_session(A) as s:
-        view = await service.register(s, name="filesystem", transport="stdio", endpoint=filesystem)
+        view = await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem)
     by_name = {t.name: t.risk for t in view.tools}
     # Straight from the server's tools/list - 14 tools in the current release.
     assert len(by_name) >= 12
@@ -144,24 +151,24 @@ async def test_a_server_that_wants_a_token_is_reported_not_marked_down(
 ):
     """GitHub, Slack and Atlassian all 401 an anonymous tools/list. That is
     "alive, needs a credential" - a different answer from "unreachable"."""
-    from app.runtime.mcp_client import AuthRequired
+    from app.mcp_registry.mcp_client import AuthRequired
 
     async with tenant_session(A) as s:
         with pytest.raises(AuthRequired):
-            await service.register(s, name="remote", transport="http",
+            await registry.register(s, name="remote", transport="http",
                                    endpoint=server_that_wants_a_token, auth_type="api_key")
     async with tenant_session(A) as s:
-        assert [v.name for v in await service.list_servers(s)] == []
+        assert mine(await registry.list_servers(s)) == []
 
 
 async def test_a_server_that_does_not_answer_is_not_saved(two_workspaces):
     async with tenant_session(A) as s:
-        with pytest.raises(service.ServerUnreachable):
-            await service.register(
+        with pytest.raises(registry.ServerUnreachable):
+            await registry.register(
                 s, name="ghost", transport="stdio", endpoint="python -c 'import sys; sys.exit(1)'",
             )
     async with tenant_session(A) as s:
-        assert [v.name for v in await service.list_servers(s)] == []
+        assert mine(await registry.list_servers(s)) == []
 
 
 # --------------------------------------------------- 4. the scheduled re-check
@@ -169,7 +176,7 @@ async def test_a_server_that_does_not_answer_is_not_saved(two_workspaces):
 
 async def test_refresh_marks_a_dead_server_down_and_a_live_one_ok(two_workspaces, filesystem):
     async with tenant_session(A) as s:
-        await service.register(s, name="filesystem", transport="stdio", endpoint=filesystem)
+        await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem)
 
     # sabotage the stored endpoint so the next check cannot reach it
     from sqlalchemy import select, update
@@ -177,28 +184,28 @@ async def test_refresh_marks_a_dead_server_down_and_a_live_one_ok(two_workspaces
     from app.models.tenant import McpServer
 
     async with tenant_session(A) as s:
-        await s.execute(update(McpServer).where(McpServer.name == "filesystem")
+        await s.execute(update(McpServer).where(McpServer.name == NAME)
                         .values(endpoint="stdio://python -c 'raise SystemExit(1)'"))
     async with tenant_session(A) as s:
-        assert await service.refresh(s, "filesystem") == "down"
-        row = await s.scalar(select(McpServer).where(McpServer.name == "filesystem"))
+        assert await registry.refresh(s, NAME) == "down"
+        row = await s.scalar(select(McpServer).where(McpServer.name == NAME))
         assert row.status == "down"
 
     # repair it: the next check brings it back
     async with tenant_session(A) as s:
-        await s.execute(update(McpServer).where(McpServer.name == "filesystem")
+        await s.execute(update(McpServer).where(McpServer.name == NAME)
                         .values(endpoint=f"stdio://{filesystem}"))
     async with tenant_session(A) as s:
-        assert await service.refresh(s, "filesystem") == "ok"
+        assert await registry.refresh(s, NAME) == "ok"
 
 
 async def test_the_sweep_visits_every_workspace(two_workspaces, filesystem):
     from app.mcp_registry import health
 
     async with tenant_session(A) as s:
-        await service.register(s, name="filesystem", transport="stdio", endpoint=filesystem)
+        await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem)
     results = await health.check_everything()
-    assert f"{A}/filesystem" in results
+    assert f"{A}/{NAME}" in results
 
 
 # --------------------------------------------------- 5. shared versus private
@@ -206,35 +213,35 @@ async def test_the_sweep_visits_every_workspace(two_workspaces, filesystem):
 
 async def test_a_private_server_is_invisible_to_another_company(two_workspaces, filesystem):
     async with tenant_session(A) as s:
-        await service.register(s, name="filesystem", transport="stdio", endpoint=filesystem)
+        await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem)
     async with tenant_session(B) as s:
-        assert [v.name for v in await service.list_servers(s)] == []
+        assert mine(await registry.list_servers(s)) == []
 
 
 async def test_a_shared_server_is_visible_to_every_company(two_workspaces, filesystem):
     async with tenant_session(A) as s:
-        view = await service.register(
-            s, name="filesystem", transport="stdio", endpoint=filesystem,
+        view = await registry.register(
+            s, name=NAME, transport="stdio", endpoint=filesystem,
             scope="shared", shared_by=A,
         )
     assert view.scope == "shared"
 
     for tenant in (A, B):
         async with tenant_session(tenant) as s:
-            seen = {v.name: v.scope for v in await service.list_servers(s)}
-            assert seen == {"filesystem": "shared"}
+            seen = {v.name: v.scope for v in mine(await registry.list_servers(s))}
+            assert seen == {NAME: "shared"}
 
 
 async def test_a_private_server_shadows_a_shared_one_with_the_same_name(two_workspaces, filesystem):
     """A company can override a shared entry with its own copy."""
     async with tenant_session(A) as s:
-        await service.register(s, name="filesystem", transport="stdio", endpoint=filesystem,
+        await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem,
                                scope="shared", shared_by=A)
     async with tenant_session(B) as s:
-        await service.register(s, name="filesystem", transport="stdio", endpoint=filesystem,
+        await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem,
                                description="Helios' own")
     async with tenant_session(B) as s:
-        views = await service.list_servers(s)
+        views = mine(await registry.list_servers(s))
         assert len(views) == 1 and views[0].scope == "private"
         assert views[0].description == "Helios' own"
 

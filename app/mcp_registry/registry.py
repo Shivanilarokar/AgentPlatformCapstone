@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.platform_ import SharedServer, SharedTool
 from app.models.tenant import Connection, McpServer, McpTool
-from app.runtime.mcp_client import AuthRequired, DiscoveredTool, Endpoint, list_tools
+from app.mcp_registry.mcp_client import AuthRequired, DiscoveredTool, Endpoint, list_tools
 
 log = logging.getLogger(__name__)
 

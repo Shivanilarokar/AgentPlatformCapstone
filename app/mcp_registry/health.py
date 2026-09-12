@@ -26,8 +26,8 @@ from sqlalchemy import select, text
 from app.core.db import engine, platform_session, tenant_session
 from app.models.platform_ import SharedServer
 from app.models.tenant import McpServer
-from app.mcp_registry import service
-from app.vault import service as vault
+from app.mcp_registry import registry
+from app.vault import connections as vault
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ async def check_everything() -> dict[str, str]:
     async with platform_session() as s:
         for srv in await s.scalars(select(SharedServer)):
             try:
-                results[f"shared/{srv.name}"] = await service.refresh(s, srv.name, shared=True)
+                results[f"shared/{srv.name}"] = await registry.refresh(s, srv.name, shared=True)
             except Exception as exc:  # noqa: BLE001 - one bad server must not stop the sweep
                 log.warning("health: shared %s: %s", srv.name, exc)
                 results[f"shared/{srv.name}"] = "error"
@@ -61,7 +61,7 @@ async def check_everything() -> dict[str, str]:
                     try:
                         # Borrowed for this one tools/list call, then dropped.
                         token = await vault.use(s, tenant=tenant_slug, server_name=srv.name)
-                        results[f"{tenant_slug}/{srv.name}"] = await service.refresh(
+                        results[f"{tenant_slug}/{srv.name}"] = await registry.refresh(
                             s, srv.name, token=token
                         )
                         del token

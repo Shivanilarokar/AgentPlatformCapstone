@@ -34,7 +34,7 @@ from langgraph.types import Command  # noqa: E402
 from app.builder.schema import AgentConfig  # noqa: E402
 from app.runtime.compiler import compile_agent  # noqa: E402
 from app.runtime.guarded_tool import RunContext  # noqa: E402
-from app.runtime.mcp_client import Endpoint  # noqa: E402
+from app.mcp_registry.mcp_client import Endpoint  # noqa: E402
 from app.vault.resolver import registry_endpoints, static_resolver, vault_resolver  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
