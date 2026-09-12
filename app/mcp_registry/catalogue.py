@@ -31,13 +31,13 @@ class ServerSpec:
     description: str
     auth_type: str = "none"  # none | api_key | oauth
     #: stdio only - env var the subprocess reads its credential from
-    token_env: str | None = None
+    credential_env_var: str | None = None
     #: what the Connections screen asks the user to paste
     credential_hint: str = ""
     homepage: str = ""
 
     def to_endpoint(self) -> Endpoint:
-        return Endpoint.parse(self.transport, self.endpoint, self.token_env, self.auth_type)
+        return Endpoint.parse(self.transport, self.endpoint, self.credential_env_var, self.auth_type)
 
 
 CATALOGUE: dict[str, ServerSpec] = {

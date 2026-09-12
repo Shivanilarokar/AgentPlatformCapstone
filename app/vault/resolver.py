@@ -19,12 +19,12 @@ from app.mcp_registry.mcp_client import Endpoint
 from app.vault import connections
 
 
-def vault_resolver(tenant_slug: str) -> Callable[[str], Awaitable[str | None]]:
+def vault_resolver(tenant_key: str) -> Callable[[str], Awaitable[str | None]]:
     """Build the `resolve_token` a RunContext needs, for one company."""
 
     async def resolve(server_name: str) -> str | None:
-        async with tenant_session(tenant_slug) as session:
-            return await connections.use(session, tenant=tenant_slug, server_name=server_name)
+        async with tenant_session(tenant_key) as session:
+            return await connections.use(session, tenant=tenant_key, server_name=server_name)
 
     return resolve
 
@@ -38,11 +38,11 @@ def static_resolver(tokens: dict[str, str]) -> Callable[[str], Awaitable[str | N
     return resolve
 
 
-def registry_endpoints(tenant_slug: str) -> Callable[[str], Awaitable[Endpoint | None]]:
+def registry_endpoints(tenant_key: str) -> Callable[[str], Awaitable[Endpoint | None]]:
     """Server name -> Endpoint, from this company's registry (private first, then shared)."""
 
     async def resolve(server_name: str) -> Endpoint | None:
-        async with tenant_session(tenant_slug) as session:
+        async with tenant_session(tenant_key) as session:
             return await registry.endpoint_for(session, server_name)
 
     return resolve

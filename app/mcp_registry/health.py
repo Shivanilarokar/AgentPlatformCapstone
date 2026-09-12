@@ -50,26 +50,26 @@ async def check_everything() -> dict[str, str]:
 
     # --- every company's private servers, one schema at a time --------------
     async with engine.connect() as conn:
-        slugs = [r[0] for r in await conn.execute(text(
-            'SELECT slug FROM platform.tenants ORDER BY slug'
+        keys = [r[0] for r in await conn.execute(text(
+            'SELECT schema_key FROM platform.tenants ORDER BY schema_key'
         ))]
 
-    for tenant_slug in slugs:
+    for tenant_key in keys:
         try:
-            async with tenant_session(tenant_slug) as s:
+            async with tenant_session(tenant_key) as s:
                 for srv in await s.scalars(select(McpServer)):
                     try:
                         # Borrowed for this one tools/list call, then dropped.
-                        token = await vault.use(s, tenant=tenant_slug, server_name=srv.name)
-                        results[f"{tenant_slug}/{srv.name}"] = await registry.refresh(
+                        token = await vault.use(s, tenant=tenant_key, server_name=srv.name)
+                        results[f"{tenant_key}/{srv.name}"] = await registry.refresh(
                             s, srv.name, token=token
                         )
                         del token
                     except Exception as exc:  # noqa: BLE001
-                        log.warning("health: %s/%s: %s", tenant_slug, srv.name, exc)
-                        results[f"{tenant_slug}/{srv.name}"] = "error"
+                        log.warning("health: %s/%s: %s", tenant_key, srv.name, exc)
+                        results[f"{tenant_key}/{srv.name}"] = "error"
         except Exception as exc:  # noqa: BLE001 - a broken schema must not stop the sweep
-            log.warning("health: tenant %s: %s", tenant_slug, exc)
+            log.warning("health: tenant %s: %s", tenant_key, exc)
 
     down = [k for k, v in results.items() if v == "down"]
     log.info("health sweep: %d checked, %d down%s", len(results), len(down),

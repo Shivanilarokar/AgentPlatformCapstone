@@ -40,7 +40,7 @@ class Agent(Base):
 class McpServer(Base):
     """A tool server this workspace has registered.
 
-    `status` is maintained by introspection, never typed in: a server that stops
+    `health` is maintained by introspection, never typed in: a server that stops
     answering is marked down, and agents that depend on it show as degraded.
     """
 
@@ -52,11 +52,11 @@ class McpServer(Base):
     endpoint: Mapped[str] = mapped_column(String(500))
     auth_type: Mapped[str] = mapped_column(String(20), default="none")  # none | api_key | oauth
     #: stdio only: which env var the subprocess reads its credential from
-    token_env: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    credential_env_var: Mapped[str | None] = mapped_column(String(80), nullable=True)
     description: Mapped[str] = mapped_column(Text, default="")
-    status: Mapped[str] = mapped_column(String(10), default="ok")  # ok | down
+    health: Mapped[str] = mapped_column(String(10), default="ok")  # ok | down
     #: "shared" ships with the platform; "private" was registered by this company
-    scope: Mapped[str] = mapped_column(String(10), default="shared")
+    visibility: Mapped[str] = mapped_column(String(10), default="shared")
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -102,12 +102,12 @@ class Connection(Base):
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     server_name: Mapped[str] = mapped_column(String(50), unique=True)
 
-    # --- the sealed secret. Every one of these is ciphertext. ----------------
-    ciphertext: Mapped[bytes] = mapped_column(LargeBinary)
-    nonce: Mapped[bytes] = mapped_column(LargeBinary)
-    wrapped_dek: Mapped[bytes] = mapped_column(LargeBinary)
-    dek_nonce: Mapped[bytes] = mapped_column(LargeBinary)
-    key_version: Mapped[int] = mapped_column(Integer, default=1)
+    # --- the sealed secret. Every one of these is encrypted_secret. ----------------
+    encrypted_secret: Mapped[bytes] = mapped_column(LargeBinary)
+    secret_nonce: Mapped[bytes] = mapped_column(LargeBinary)
+    encrypted_data_key: Mapped[bytes] = mapped_column(LargeBinary)
+    data_key_nonce: Mapped[bytes] = mapped_column(LargeBinary)
+    master_key_version: Mapped[int] = mapped_column(Integer, default=1)
 
     status: Mapped[str] = mapped_column(String(20), default="active")  # active|revoked
     added_by: Mapped[str] = mapped_column(String(255), default="")

@@ -112,7 +112,7 @@ def filesystem_endpoints(root: Path):
     """
     ep = Endpoint.parse(
         "stdio", f"npx -y @modelcontextprotocol/server-filesystem {root}",
-        token_env="FORGE_TEST_TOKEN", auth_type="api_key",
+        credential_env_var="FORGE_TEST_TOKEN", auth_type="api_key",
     )
 
     async def resolve(_server_name: str) -> Endpoint | None:

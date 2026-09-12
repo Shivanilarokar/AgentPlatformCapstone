@@ -13,13 +13,13 @@ import { Badge } from "../ui";
 const MESSAGES = {
   bad_credentials: "That email and password do not match.",
   email_taken: "That email already has an account. Sign in instead.",
-  company_taken: "A workspace with that name already exists. Pick another.",
+  bad_invite_code: "That company already exists. Ask its admin for the invite code and enter it below.",
   bad_company_name: "Use letters and numbers for the company name.",
 };
 
 export default function SignIn() {
   const [mode, setMode] = useState("signin");
-  const [form, setForm] = useState({ email: "", password: "", name: "", company: "" });
+  const [form, setForm] = useState({ email: "", password: "", name: "", company: "", invite_code: "" });
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
@@ -38,6 +38,7 @@ export default function SignIn() {
           password: form.password,
           name: form.name.trim() || form.email.split("@")[0],
           company: form.company.trim(),
+          invite_code: form.invite_code.trim() || null,
         });
       } else {
         await post("/auth/login", { email: form.email.trim(), password: form.password });
@@ -74,7 +75,7 @@ export default function SignIn() {
           </h2>
           <p className="muted" style={{ margin: "0 0 22px", fontSize: 13 }}>
             {signup
-              ? "Your company gets its own schema, created the moment you sign up."
+              ? "A new company gets its own schema and you become its admin. An existing one needs its invite code; you join as a member."
               : "Build, test and publish agents."}
           </p>
 
@@ -85,6 +86,13 @@ export default function SignIn() {
                   <label htmlFor="company">Company</label>
                   <input id="company" value={form.company} onChange={set("company")}
                          placeholder="Northwind Labs" autoComplete="organization" required />
+                </div>
+                <div className="fld">
+                  <label htmlFor="invite">
+                    Invite code <span className="faint">(only when joining an existing company)</span>
+                  </label>
+                  <input id="invite" className="mono" value={form.invite_code} onChange={set("invite_code")}
+                         placeholder="from your admin" autoComplete="off" />
                 </div>
                 <div className="fld">
                   <label htmlFor="name">Your name</label>

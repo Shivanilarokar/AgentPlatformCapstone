@@ -49,8 +49,8 @@ class ServerView:
     endpoint: str
     auth_type: str
     description: str
-    status: str
-    scope: str  # private | shared
+    health: str  # ok | down
+    visibility: str  # private | shared
     shared_by: str
     last_checked_at: datetime | None
     tools: list  # McpTool | SharedTool
@@ -73,13 +73,13 @@ async def list_servers(session: AsyncSession) -> list[ServerView]:
     views: dict[str, ServerView] = {}
     for s in shared:
         views[s.name] = ServerView(
-            s.name, s.transport, s.endpoint, s.auth_type, s.description, s.status,
+            s.name, s.transport, s.endpoint, s.auth_type, s.description, s.health,
             "shared", s.shared_by, s.last_checked_at,
             [t for t in shared_tools if t.server_id == s.id],
         )
     for s in private:
         views[s.name] = ServerView(
-            s.name, s.transport, s.endpoint, s.auth_type, s.description, s.status,
+            s.name, s.transport, s.endpoint, s.auth_type, s.description, s.health,
             "private", "", s.last_checked_at, list(s.tools),
         )
     return sorted(views.values(), key=lambda v: v.name)
@@ -97,7 +97,7 @@ async def endpoint_for(session: AsyncSession, name: str) -> Endpoint | None:
         row = await session.scalar(select(SharedServer).where(SharedServer.name == name))
     if row is None:
         return None
-    return Endpoint.parse(row.transport, row.endpoint, row.token_env, row.auth_type)
+    return Endpoint.parse(row.transport, row.endpoint, row.credential_env_var, row.auth_type)
 
 
 # -------------------------------------------------------------------- write
@@ -127,22 +127,22 @@ async def register(
     transport: str,
     endpoint: str,
     auth_type: str = "none",
-    token_env: str | None = None,
+    credential_env_var: str | None = None,
     description: str = "",
-    scope: str = "private",
+    visibility: str = "private",
     shared_by: str = "",
     token: str | None = None,
 ) -> ServerView:
     """Connect, ask what tools it has, store the answer. In that order.
 
-    `scope="shared"` writes to platform.mcp_servers instead of this company's
+    `visibility="shared"` writes to platform.mcp_servers instead of this company's
     schema. The router only allows that for admins.
     """
-    ep = Endpoint.parse(transport, endpoint, token_env, auth_type)
+    ep = Endpoint.parse(transport, endpoint, credential_env_var, auth_type)
     discovered = await discover(ep, token)
     now = datetime.now(timezone.utc)
 
-    if scope == "shared":
+    if visibility == "shared":
         server = await session.scalar(select(SharedServer).where(SharedServer.name == name))
         if server is None:
             server = SharedServer(name=name)
@@ -154,15 +154,15 @@ async def register(
         if server is None:
             server = McpServer(name=name)
             session.add(server)
-        server.scope = "private"
+        server.visibility = "private"
         tool_cls, fk = McpTool, McpTool.server_id
 
     server.transport = ep.transport
     server.endpoint = ep.display
     server.auth_type = auth_type
-    server.token_env = token_env
+    server.credential_env_var = credential_env_var
     server.description = description
-    server.status = "ok"
+    server.health = "ok"
     server.last_checked_at = now
     await session.flush()
 
@@ -172,7 +172,7 @@ async def register(
     tools = list(await session.scalars(select(tool_cls).where(fk == server.id)))
     return ServerView(
         server.name, server.transport, server.endpoint, server.auth_type, server.description,
-        server.status, scope, shared_by, now, tools,
+        server.health, visibility, shared_by, now, tools,
     )
 
 
@@ -181,7 +181,7 @@ async def refresh(
 ) -> str:
     """Re-ask a known server what it has; mark it down if it has gone away.
 
-    Returns the new status. Called by the Re-check button AND by the scheduled
+    Returns the new health. Called by the Re-check button AND by the scheduled
     health job - same function, so a dead server shows as down either way.
 
     `shared=True` skips the private table: the health sweep walks shared servers
@@ -198,19 +198,19 @@ async def refresh(
         raise KeyError(name)
 
     server.last_checked_at = datetime.now(timezone.utc)
-    ep = Endpoint.parse(server.transport, server.endpoint, server.token_env, server.auth_type)
+    ep = Endpoint.parse(server.transport, server.endpoint, server.credential_env_var, server.auth_type)
     try:
         discovered = await discover(ep, token)
     except AuthRequired:
         # It answered. A 401 from a server we hold no token for is "alive",
         # which is what this check is for; the tool list stays as last seen.
-        server.status = "ok"
+        server.health = "ok"
         return "ok"
     except ServerUnreachable:
-        server.status = "down"
+        server.health = "down"
         return "down"
 
-    server.status = "ok"
+    server.health = "ok"
     await _replace_tools(session, server.id, discovered, tool_cls, fk)
     return "ok"
 

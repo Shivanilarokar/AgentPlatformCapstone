@@ -17,11 +17,11 @@ the environment. Only wrapped DEKs are stored.
   * rotating the master key means re-wrapping N small DEKs, not re-encrypting
     every secret
   * the master key is never used on user data directly, so it is exposed to far
-    less ciphertext
-  * `key_version` records which master key wrapped each row, so rotation can be
+    less encrypted_secret
+  * `master_key_version` records which master key wrapped each row, so rotation can be
     gradual rather than a big-bang migration
 
-AES-GCM is authenticated, and we bind each ciphertext to WHERE IT LIVES using
+AES-GCM is authenticated, and we bind each encrypted_secret to WHERE IT LIVES using
 additional authenticated data (AAD) of `tenant:server`. A row copied out of one
 company's schema into another's will not decrypt - the AAD no longer matches.
 That turns a copy-paste mistake into a loud failure instead of a quiet breach.
@@ -50,11 +50,11 @@ class VaultError(Exception):
 class SealedSecret:
     """Exactly what goes in the database. No field here is readable."""
 
-    ciphertext: bytes
-    nonce: bytes
-    wrapped_dek: bytes
-    dek_nonce: bytes
-    key_version: int
+    encrypted_secret: bytes
+    secret_nonce: bytes
+    encrypted_data_key: bytes
+    data_key_nonce: bytes
+    master_key_version: int
 
 
 def _master_key() -> bytes:
@@ -80,7 +80,7 @@ def _master_key() -> bytes:
 
 
 def _aad(tenant: str, server_name: str) -> bytes:
-    """Binds a ciphertext to the company and server it belongs to."""
+    """Binds a encrypted_secret to the company and server it belongs to."""
     return f"{tenant}:{server_name}".encode()
 
 
@@ -92,14 +92,14 @@ def seal(secret: str, *, tenant: str, server_name: str) -> SealedSecret:
     aad = _aad(tenant, server_name)
 
     dek = AESGCM.generate_key(bit_length=256)
-    nonce = os.urandom(NONCE_BYTES)
-    ciphertext = AESGCM(dek).encrypt(nonce, secret.encode(), aad)
+    secret_nonce = os.urandom(NONCE_BYTES)
+    encrypted_secret = AESGCM(dek).encrypt(secret_nonce, secret.encode(), aad)
 
-    dek_nonce = os.urandom(NONCE_BYTES)
-    wrapped_dek = AESGCM(_master_key()).encrypt(dek_nonce, dek, aad)
+    data_key_nonce = os.urandom(NONCE_BYTES)
+    encrypted_data_key = AESGCM(_master_key()).encrypt(data_key_nonce, dek, aad)
 
     del dek  # the unwrapped data key must not outlive this call either
-    return SealedSecret(ciphertext, nonce, wrapped_dek, dek_nonce, key_version=1)
+    return SealedSecret(encrypted_secret, secret_nonce, encrypted_data_key, data_key_nonce, master_key_version=1)
 
 
 def open_(sealed: SealedSecret, *, tenant: str, server_name: str) -> str:
@@ -109,8 +109,8 @@ def open_(sealed: SealedSecret, *, tenant: str, server_name: str) -> str:
     """
     aad = _aad(tenant, server_name)
     try:
-        dek = AESGCM(_master_key()).decrypt(sealed.dek_nonce, sealed.wrapped_dek, aad)
-        plaintext = AESGCM(dek).decrypt(sealed.nonce, sealed.ciphertext, aad)
+        dek = AESGCM(_master_key()).decrypt(sealed.data_key_nonce, sealed.encrypted_data_key, aad)
+        plaintext = AESGCM(dek).decrypt(sealed.secret_nonce, sealed.encrypted_secret, aad)
     except InvalidTag as exc:
         # Wrong master key, or the row was moved between tenants/servers.
         raise VaultError("could not decrypt this connection") from exc

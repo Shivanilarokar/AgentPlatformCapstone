@@ -58,7 +58,7 @@ async def test_unknown_id_is_indistinguishable_from_another_tenants_id():
 
 def test_schema_name_rejects_injection():
     """The one string we interpolate into SQL is validated, not trusted."""
-    assert schema_for("alpha") == "t_alpha"
+    assert schema_for("regtest_alpha") == "t_regtest_alpha"
     for evil in ('a"; DROP SCHEMA public CASCADE; --', "a-b c", "../x", ""):
         with pytest.raises(ValueError):
             schema_for(evil)

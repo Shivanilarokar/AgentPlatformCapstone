@@ -61,7 +61,7 @@ async def main() -> int:
     (scratch / "handbook.md").write_text(HANDBOOK, encoding="utf-8")
     local = Endpoint.parse(
         "stdio", f"npx -y @modelcontextprotocol/server-filesystem {scratch}",
-        token_env="FORGE_DEMO_TOKEN", auth_type="api_key",
+        credential_env_var="FORGE_DEMO_TOKEN", auth_type="api_key",
     )
 
     async def local_endpoints(_name: str) -> Endpoint | None:

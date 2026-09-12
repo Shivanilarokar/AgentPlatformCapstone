@@ -147,7 +147,7 @@ Every row answers: *what problem does this solve, and what breaks if we swap it?
 | **Checkpointer** | **`AsyncPostgresSaver`** | Writes graph state to Postgres, so a pause survives a restart and a weekend. One per tenant schema. | `InMemorySaver` fails checks 5 and 6 the moment the container restarts. |
 | **Model layer** | **`langchain.init_chat_model`** | One call swaps provider, so `model.provider` in the config is honoured and we keep a **fallback key for the live demo**. | Calling a provider SDK directly means a rewrite to switch when a free tier rate-limits mid-presentation. |
 | **Tools** | **MCP Python SDK** | Rule 1 of the flow: the platform must **ask a server what tools it has**. `tools/list` + `tools/call` is exactly that. | Hardcoding tool names fails step 1 outright — "the registry would be a lie the moment a server changed". |
-| **Crypto** | **`cryptography`, AES-256-GCM** | AEAD with **AAD** = `tenant_id‖server_id`, so a ciphertext row copied to another schema will not decrypt. | Fernet has no AAD, so a stolen row decrypts anywhere. |
+| **Crypto** | **`cryptography`, AES-256-GCM** | AEAD with **AAD** = `tenant_id‖server_id`, so a encrypted_secret row copied to another schema will not decrypt. | Fernet has no AAD, so a stolen row decrypts anywhere. |
 | **Auth** | **PyJWT + argon2-cffi** | `tenant_id` and `role` travel in the token, which is what the gate reads. Stateless → no extra DB round trip per request. | Server sessions add a lookup before you can even pick a schema. |
 | **Frontend** | **React + Vite** | The playground needs **SSE streaming** and optimistic approval UI; the mockups are already component-shaped (one card reused in 3 places). | Server-rendered templates make the build chat and the streaming playground awkward. |
 | **Packaging** | **Docker Compose** | Grading runs `docker compose up`. Not optional. | — |
@@ -234,8 +234,8 @@ sequenceDiagram
     API->>V: encrypt(tenant_id, server_id, secret)
     V->>V: dek = AESGCM.generate_key(256)
     V->>V: ct = AESGCM(dek).encrypt(nonce, secret, aad)
-    V->>V: wrapped_dek = AESGCM(master_key).encrypt(n2, dek, aad)
-    V->>DB: INSERT connections (ciphertext, nonce, wrapped_dek, key_version)
+    V->>V: encrypted_data_key = AESGCM(master_key).encrypt(n2, dek, aad)
+    V->>DB: INSERT connections (encrypted_secret, nonce, encrypted_data_key, master_key_version)
     API-->>U: 201 {id, server, status: "active", secret: "........"}
     Note over API,U: the plaintext is now unreachable.<br/>No endpoint anywhere returns it.
 ```
@@ -508,10 +508,10 @@ erDiagram
     CONNECTIONS {
         uuid id PK
         text server_name
-        bytea ciphertext
+        bytea encrypted_secret
         bytea nonce
-        bytea wrapped_dek
-        int key_version
+        bytea encrypted_data_key
+        int master_key_version
         text status
     }
     MCP_SERVERS {
@@ -603,7 +603,7 @@ classDiagram
     }
     class Vault {
         +encrypt(tenant, server, secret)
-        +use(tenant, slug) str
+        +use(tenant, server_name) str
         -unwrap_dek(row) bytes
     }
     class MCPClient {

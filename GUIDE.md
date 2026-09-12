@@ -15,7 +15,7 @@ Read `docs/ARCHITECTURE.md` first (plain language, why each decision), then `doc
 
 | Step | Status | What exists today | Files |
 |---|---|---|---|
-| 1 Register a tool server | ✅ done | Form: name, transport (stdio / http / sse), endpoint, auth type, shared or private. The platform connects out and calls `tools/list` — no tool is typed by hand. Read / write / destructive marking. Health job every 5 min marks dead servers `down`. Sharing with everyone = `platform_admin` only. | `app/api/routers/servers.py` · `app/mcp_registry/registry.py` · `app/mcp_registry/catalogue.py` · `app/mcp_registry/health.py` · `app/mcp_registry/client.py` (transports + `classify_risk`) · `app/models/tenant.py` (`McpServer`, `McpTool`) · `app/models/platform_.py` (`SharedServer`, `SharedTool`) · `web/src/pages/Registry.jsx` |
+| 1 Register a tool server | ✅ done | Form: name, transport (stdio / http / sse), endpoint, auth type, shared or private. The platform connects out and calls `tools/list` — no tool is typed by hand. Read / write / destructive marking. Health job every 5 min marks dead servers `down`. Sharing with everyone = company admins only. | `app/api/routers/servers.py` · `app/mcp_registry/registry.py` · `app/mcp_registry/catalogue.py` · `app/mcp_registry/health.py` · `app/mcp_registry/client.py` (transports + `classify_risk`) · `app/models/tenant.py` (`McpServer`, `McpTool`) · `app/models/platform_.py` (`SharedServer`, `SharedTool`) · `web/src/pages/Registry.jsx` |
 | 2 Connect to it | ✅ done | AES-256-GCM envelope encryption, per-row data key, AAD = tenant + server. No endpoint returns a secret; the UI shows dots. A test stores a sentinel token and greps every table in every schema for it. | `app/vault/envelope.py` · `app/vault/connections.py` · `app/vault/resolver.py` · `app/api/routers/connections.py` · `app/models/tenant.py` (`Connection`) · `web/src/pages/Connections.jsx` |
 | 3 Describe an agent | ✅ except score | Builder graph with two LangGraph interrupts (`select_tools`, `missing_connection`); survives `docker compose restart api`; form mode drives the *same* graph. **No score shown yet.** | `app/builder/schema.py` (`AgentConfig`) · `app/builder/graph.py` · `app/api/routers/builds.py` · `app/tenancy/checkpointers.py` · `web/src/pages/Build.jsx` |
 | 4 Test it | ⚠️ half | Agent page, graph drawn from the stored config, tools + approval table, raw configuration JSON. **No playground, no runs, no scores, no API tab.** | done: `app/api/routers/agents.py` · `app/runtime/compiler.py` · `app/runtime/guarded_tool.py` · `app/runtime/models.py` · `web/src/pages/MyAgents.jsx` · `web/src/pages/AgentDetail.jsx` — pending: `app/api/routers/runs.py`, `app/scoring/`, Playground/Runs tabs in `AgentDetail.jsx` |
@@ -48,8 +48,8 @@ Cross-cutting, already done: `app/core/db.py` + `app/api/deps.py` (tenant gate),
 - `uv run pytest -q` → **118 passed, 1 skipped** (the skip is the opt-in live-model test).
 - `cd web && npm run build` → clean.
 - `docker compose up -d --build` → 4 containers up (`db`, `api`, `web`, `pgadmin`).
-- Dead code, scratch files and the `slug` naming were cleaned up on 11 Sep. `tenants.slug` is the
-  one deliberate slug left: it is the key that becomes the schema name.
+- Dead code and scratch files were cleaned up on 11 Sep; every column now has a descriptive name
+  (`tenants.schema_key`, `mcp_servers.health`/`visibility`/`credential_env_var`, `connections.encrypted_secret`…).
 - **Nothing is committed yet.** First action for whoever reads this: `git add -A && git commit`.
 - No Alembic yet — every model change means `uv run python scripts/reset_db.py` and signing up again.
 
@@ -111,7 +111,7 @@ $ curl localhost:8000/health
 
 | URL | What | Login |
 |---|---|---|
-| <http://localhost:5173> | the product (React + Vite) | sign up — first signup ever becomes `platform_admin` |
+| <http://localhost:5173> | the product (React + Vite) | sign up with a new company name → you are its admin; with an existing name + its invite code → member |
 | <http://localhost:8000/docs> | FastAPI Swagger | cookie from the UI, or paste the JWT |
 | <http://localhost:5050> | pgAdmin (the database, in a browser) | `admin@forge.dev` / `admin`; server `forge` is pre-registered |
 
@@ -142,25 +142,45 @@ form-vs-chat invariant and the CI check that no query ever schema-qualifies a te
 
 ## 2. Test accounts (shared dev database)
 
-Two companies, so cross-company behaviour can be seen from both sides. Same password everywhere.
+Two companies; each has an **admin** (the person who created it) and a **member** (joined with the
+company's invite code). There is no platform-wide super-user: an admin runs their own company,
+can share a server with every company, and reviews the marketplace. Same password everywhere.
 
-| Person | Email | Password | Company | Role | Sees |
+| Person | Email | Password | Company | Role | Invite code |
 |---|---|---|---|---|---|
-| Shivani | `shivani@northwind.example` | `Passw0rd!` | Northwind Labs (`t_northwind_labs`) | **platform_admin** (first ever signup) | everything + **Admin Review**; can register servers as *Everyone* |
-| Jai | `jai@maven.example` | `Passw0rd!` | Maven (`t_maven`) | admin of Maven | his own workspace + the shared servers |
+| Shivani | `shivani@northwind.example` | `Passw0rd!` | Northwind Labs (`t_northwind_labs`) | **admin** | `a8e392b6` |
+| Priya | `priya@northwind.example` | `Passw0rd!` | Northwind Labs | member | |
+| Jai | `jai@maven.example` | `Passw0rd!` | Maven (`t_maven`) | **admin** | `d9e9f300` |
+| Riya | `riya@maven.example` | `Passw0rd!` | Maven | member | |
+
+What each role can do:
+
+| | member | admin |
+|---|---|---|
+| Registry: register a private server, re-check, see shared ones | ✅ | ✅ |
+| Registry: **Visible to → Everyone** (goes to `platform.mcp_servers`) | ✗ 403 | ✅ |
+| Connections, Build, My Agents — inside own workspace | ✅ | ✅ |
+| See the company's invite code (sidebar) | ✗ | ✅ |
+| **Admin Review** in the nav, `POST /v1/servers/health-sweep` | ✗ | ✅ |
+| Anything belonging to the *other* company | ✗ (404) | ✗ (404) |
+
+How joining works: sign up with an existing company name **and** its invite code → `member`.
+Without the code the API answers `403 bad_invite_code`, so nobody joins a company by guessing its
+name. The code is shown to admins in the sidebar and lives in `platform.tenants.invite_code`.
 
 What is set up right now:
 
-- **Shared with everyone** (registered by Shivani as platform_admin, live in `platform.mcp_servers`):
-  `filesystem` (14 tools), `git` (12), `sqlite` (6). Both companies see them; no credential needed.
-- **Private to Northwind Labs**: `github` — 44 tools discovered from `api.githubcopilot.com` with
-  Shivani's PAT, which is stored encrypted in `t_northwind_labs.connections`. Jai cannot see it.
-- To share `github` too: sign in as Shivani → Registry → click the `github` chip → paste her PAT →
-  Visible to **Everyone** → Connect & save. Jai then sees the card, but it shows **Connect** until he
-  adds *his own* PAT under Connections — credentials are never shared, only the server entry.
+- **Shared with everyone** (registered by Shivani, live in `platform.mcp_servers`): `filesystem`
+  (14 tools), `git` (12), `sqlite` (6). Both companies see them; no credential needed.
+- **Private to Northwind Labs**: `github` (44 tools) and `jira` (21) — discovered with Shivani's
+  tokens, which are encrypted in `t_northwind_labs.connections`. Priya sees and can use them
+  (same workspace); Jai and Riya cannot see them at all.
+- To share `github` too: as Shivani → Registry → `github` chip → paste PAT → Visible to
+  **Everyone** → Connect & save. Maven then sees the card with **Connect** until Jai or Riya adds
+  *their own* PAT — server entries are shared, credentials never are.
 
-If `reset_db.py` has been run, sign up again in this order: Shivani first (she must be the first
-signup to become platform_admin), then Jai with company `Maven`.
+If `reset_db.py` has been run, sign up again: Shivani (creates Northwind Labs), Jai (creates
+Maven), then Priya / Riya with the invite codes shown in each admin's sidebar.
 
 ---
 
@@ -218,7 +238,7 @@ when you register (or under **Connections** later). Every token is encrypted bef
    - `jira` — `https://mcp.atlassian.com/v2/mcp`, Atlassian's remote server. Needs a scoped API
      token, and your org admin must have enabled API-token auth for the Rovo MCP server.
    The platform connects out, calls `tools/list`, and stores what came back. Nobody types a tool in.
-   A `platform_admin` can tick **Everyone**; anyone can register **Just my workspace**.
+   An admin can tick **Everyone**; anyone can register **Just my workspace**.
 3. **Connections** → a credential for any server you registered without one. Encrypted before it
    touches the database; the list shows dots, never the value.
 4. **Build** → *"read my open GitHub issues and post a summary to Slack"*. The build pauses twice
@@ -242,21 +262,21 @@ when you register (or under **Connections** later). Every token is encrypted bef
 Right-click a table → *View/Edit Data → All Rows*, or open the Query Tool:
 
 ```sql
-SELECT name, transport, endpoint, status, scope, last_checked_at FROM t_northwind_labs.mcp_servers;
+SELECT name, transport, endpoint, status, visibility, last_checked_at FROM t_northwind_labs.mcp_servers;
 
 SELECT s.name AS server, t.name AS tool, t.risk
 FROM t_northwind_labs.mcp_tools t JOIN t_northwind_labs.mcp_servers s ON s.id = t.server_id
 ORDER BY 1, 3, 2;
 
--- the credential row: ciphertext only. Nothing here is readable.
-SELECT server_name, status, added_by, key_version, length(ciphertext) AS bytes, last_used_at
+-- the credential row: encrypted_secret only. Nothing here is readable.
+SELECT server_name, status, added_by, master_key_version, length(encrypted_secret) AS bytes, last_used_at
 FROM t_northwind_labs.connections;
 
 SELECT name, status, config->'topology'->>'type' AS shape, config->'requires_connections' AS needs
 FROM t_northwind_labs.agents;
 
 -- who is on the platform
-SELECT t.name AS company, t.slug AS schema_key, u.email, u.role FROM platform.tenants t
+SELECT t.name AS company, t.schema_key AS schema_key, u.email, u.role FROM platform.tenants t
 JOIN platform.users u ON u.tenant_id = t.id;
 ```
 
@@ -268,11 +288,35 @@ docker compose exec db psql -U forge -d forge -c '\dt t_northwind_labs.*'   # ta
 uv run python scripts/inspect_db.py                                         # every table, every schema
 ```
 
-### Naming
+### Column names, and what each one means
 
-`tenants.slug` is the only "slug" left in the schema — it is the key that becomes the schema name
-(`northwind_labs` → `t_northwind_labs`); `tenants.name` holds `Northwind Labs`. MCP servers are
-keyed by `mcp_servers.name` and connections by `connections.server_name`.
+| Table | Column | Meaning |
+|---|---|---|
+| `platform.tenants` | `name` | the company as typed at sign-up, e.g. `Northwind Labs` |
+| | `schema_key` | `northwind_labs` — becomes the schema name `t_northwind_labs` |
+| `platform.users` | `tenant_id` | which company this person belongs to |
+| | `role` | `admin` (created the company) · `member` (joined with the invite code) |
+| | `invite_code` | what a colleague types at sign-up to join as a member; shown to the admin in the sidebar |
+| `*.mcp_servers` | `transport` | `stdio` · `http` · `sse` |
+| | `endpoint` | the URL, or the stdio command line |
+| | `auth_type` | `none` · `api_key` · `oauth` |
+| | `credential_env_var` | stdio only: the env var the subprocess reads its token from |
+| | `health` | `ok` · `down` — set by discovery and the 5-minute sweep, never typed |
+| | `visibility` | `private` (this company) · `shared` (everyone; `platform.mcp_servers` only) |
+| | `shared_by` | `schema_key` of the company whose admin shared it |
+| | `last_checked_at` | when the sweep last asked it for `tools/list` |
+| `*.mcp_tools` | `input_schema` | the JSON schema the server published for the tool's arguments |
+| | `risk` | `read` · `write` · `destructive` — derived by `mcp_registry/risk.py` |
+| `t_*.connections` | `server_name` | which server this credential is for |
+| | `encrypted_secret` | the token, AES-256-GCM under a per-row data key |
+| | `secret_nonce` | GCM nonce for the line above |
+| | `encrypted_data_key` | that data key, itself encrypted under `FORGE_MASTER_KEY` |
+| | `data_key_nonce` | GCM nonce for the line above |
+| | `master_key_version` | which master key sealed it (rotation) |
+| | `status` | `active` · `revoked` |
+| | `added_by` | email of the person who pasted it |
+| | `last_used_at` | last time a tool call or health check borrowed it |
+| `t_*.agents` | `config` | the whole `AgentConfig` document (JSONB) — the agent *is* this |
 
 ---
 

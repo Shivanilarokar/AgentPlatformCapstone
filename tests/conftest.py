@@ -10,8 +10,8 @@ from app.core.db import engine, tenant_session
 from app.models.tenant import Agent
 from app.tenancy.provision import create_tenant, drop_tenant, bootstrap_platform
 
-ALPHA = "alpha"
-BETA = "beta"
+ALPHA = "regtest_alpha"
+BETA = "regtest_beta"
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session", autouse=True)
@@ -29,4 +29,6 @@ async def two_companies():
 
     yield
 
+    for key in (ALPHA, BETA):
+        await drop_tenant(key)
     await engine.dispose()

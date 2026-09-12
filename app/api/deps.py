@@ -53,7 +53,7 @@ async def tenant_db(claims: Claims = Depends(current_user)) -> AsyncIterator[Asy
     SET LOCAL is scoped to the transaction, so the setting cannot leak onto the
     next request that borrows this pooled connection.
     """
-    schema = schema_for(claims.tenant_slug)  # validated before it touches SQL
+    schema = schema_for(claims.tenant_key)  # validated before it touches SQL
     async with SessionLocal() as session:
         async with session.begin():
             await session.execute(text(f'SET LOCAL search_path TO "{schema}", platform'))

@@ -62,8 +62,8 @@ function ServerCard({ server, onRefresh }) {
       <div className="between">
         <div className="row" style={{ gap: 8 }}>
           <b style={{ fontSize: 14.5 }} title={server.endpoint}>{server.name}</b>
-          <Badge tone={server.status === "ok" ? "ok" : "danger"} dot>{server.status}</Badge>
-          {server.scope === "private" && <Badge>private</Badge>}
+          <Badge tone={server.health === "ok" ? "ok" : "danger"} dot>{server.health}</Badge>
+          {server.visibility === "private" && <Badge>private</Badge>}
         </div>
         {server.connected
           ? <Badge tone="ok">connected</Badge>
@@ -106,7 +106,7 @@ function ServerCard({ server, onRefresh }) {
 
 const EMPTY = {
   name: "", transport: "http", endpoint: "", auth_type: "oauth",
-  token_env: "", description: "", visibility: "private", token: "",
+  credential_env_var: "", description: "", visibility: "private", token: "",
 };
 
 const STEPS = [
@@ -129,7 +129,7 @@ function RegisterForm({ catalogue, isAdmin, onRegistered }) {
     setF({
       ...EMPTY,
       name: c.name, transport: c.transport, endpoint: c.endpoint,
-      auth_type: c.auth_type, token_env: c.token_env ?? "", description: c.description,
+      auth_type: c.auth_type, credential_env_var: c.credential_env_var ?? "", description: c.description,
     });
     setHint(c.credential_hint || "");
     setNeedsToken(c.transport !== "stdio" && c.auth_type !== "none");
@@ -141,7 +141,7 @@ function RegisterForm({ catalogue, isAdmin, onRegistered }) {
     try {
       const created = await post("/v1/servers", {
         name: f.name.trim(), transport: f.transport, endpoint: f.endpoint.trim(),
-        auth_type: f.auth_type, token_env: f.token_env.trim() || null,
+        auth_type: f.auth_type, credential_env_var: f.credential_env_var.trim() || null,
         description: f.description.trim(), visibility: f.visibility,
         token: f.token || null,
       });
@@ -216,7 +216,7 @@ function RegisterForm({ catalogue, isAdmin, onRegistered }) {
             </Field>
             {f.transport === "stdio" && f.auth_type !== "none" && (
               <Field label="Credential env var" hint="(what the subprocess reads)">
-                <input className="mono" value={f.token_env} onChange={set("token_env")}
+                <input className="mono" value={f.credential_env_var} onChange={set("credential_env_var")}
                        placeholder="GITHUB_PERSONAL_ACCESS_TOKEN" autoComplete="off" />
               </Field>
             )}
@@ -302,8 +302,8 @@ export default function Registry() {
   if (error) return <div className="content"><div className="note warn">{error}</div></div>;
   if (!servers) return <Loading what="the registry" />;
 
-  const shared = servers.filter((s) => s.scope === "shared");
-  const priv = servers.filter((s) => s.scope === "private");
+  const shared = servers.filter((s) => s.visibility === "shared");
+  const priv = servers.filter((s) => s.visibility === "private");
 
   return (
     <>
@@ -342,7 +342,7 @@ export default function Registry() {
           </>
         )}
 
-        <RegisterForm catalogue={catalogue} isAdmin={me?.role === "platform_admin"} onRegistered={load} />
+        <RegisterForm catalogue={catalogue} isAdmin={me?.role === "admin"} onRegistered={load} />
       </div>
     </>
   );

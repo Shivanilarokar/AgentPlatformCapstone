@@ -32,7 +32,10 @@ class Tenant(PlatformBase):
 
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(120))
-    slug: Mapped[str] = mapped_column(String(50), unique=True)  # -> t_<slug> schema key
+    schema_key: Mapped[str] = mapped_column(String(50), unique=True)  # "northwind_labs" -> schema t_northwind_labs
+    #: What a colleague types at sign-up to join this company as a member.
+    #: Without it, anyone could join any company by guessing its name.
+    invite_code: Mapped[str] = mapped_column(String(16))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -45,7 +48,7 @@ class User(PlatformBase):
     email: Mapped[str] = mapped_column(String(255), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     name: Mapped[str] = mapped_column(String(120))
-    role: Mapped[str] = mapped_column(String(20), default="member")  # member | admin
+    role: Mapped[str] = mapped_column(String(20), default="member")  # admin (first user) | member
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -64,9 +67,9 @@ class SharedServer(PlatformBase):
     transport: Mapped[str] = mapped_column(String(20))
     endpoint: Mapped[str] = mapped_column(String(500))
     auth_type: Mapped[str] = mapped_column(String(20), default="none")
-    token_env: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    credential_env_var: Mapped[str | None] = mapped_column(String(80), nullable=True)
     description: Mapped[str] = mapped_column(Text, default="")
-    status: Mapped[str] = mapped_column(String(10), default="ok")
+    health: Mapped[str] = mapped_column(String(10), default="ok")
     shared_by: Mapped[str] = mapped_column(String(120), default="")  # company name
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

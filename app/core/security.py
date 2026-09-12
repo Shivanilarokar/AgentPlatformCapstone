@@ -41,28 +41,24 @@ class Claims:
 
     user_id: str
     tenant_id: str
-    tenant_slug: str
+    tenant_key: str
     email: str
     name: str
     role: str
 
     @property
     def is_admin(self) -> bool:
-        """PLATFORM admin: can share a server with everyone, and reviews the
-        marketplace. Only the first person to sign up gets this."""
-        return self.role == "platform_admin"
-
-    @property
-    def is_workspace_admin(self) -> bool:
-        """Runs one company. The first user of each company."""
-        return self.role in ("admin", "platform_admin")
+        """Runs the company: the first person to sign up for it. Admins can share
+        a server with every company, invite members, and review the marketplace.
+        Members can do everything else inside their own workspace."""
+        return self.role == "admin"
 
 
 def issue_token(claims: Claims) -> str:
     payload = {
         "sub": claims.user_id,
         "tid": claims.tenant_id,
-        "slug": claims.tenant_slug,
+        "tenant_key": claims.tenant_key,
         "email": claims.email,
         "name": claims.name,
         "role": claims.role,
@@ -77,7 +73,7 @@ def read_token(token: str) -> Claims:
     return Claims(
         user_id=data["sub"],
         tenant_id=data["tid"],
-        tenant_slug=data["slug"],
+        tenant_key=data["tenant_key"],
         email=data["email"],
         name=data["name"],
         role=data["role"],

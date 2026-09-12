@@ -74,7 +74,7 @@ Everything else in this document is a consequence of that one sentence.
 **(a) `requires_connection` names a server *name*, never a connection id and never a token.**
 This one line is the entire reason a marketplace can exist. The config says *"this needs a Slack
 connection"* — it does not say *which* one. At run time the runtime resolves
-`slug + whoever is running this → their connection row`. Northwind's config, installed by Helios,
+`server name + whoever is running this → their connection row`. Northwind's config, installed by Helios,
 transparently uses Helios's token.
 
 **(b) `approval` is never trusted from the config.** On save and again on every run, the platform
@@ -209,8 +209,8 @@ The test is blunt: *"we search everything your system stored for the token we ga
 anywhere is a fail."*
 
 **Encryption.** AES-256-GCM per connection, data key wrapped by a master key from `FORGE_MASTER_KEY`,
-with a `key_version` column for rotation. Use `tenant_id || server_id` as the GCM **AAD** — so a
-ciphertext row copied into another schema simply refuses to decrypt. Cheap to build, strong to say.
+with a `master_key_version` column for rotation. Use `tenant_id || server_id` as the GCM **AAD** — so a
+encrypted_secret row copied into another schema simply refuses to decrypt. Cheap to build, strong to say.
 
 **Lifecycle, enforced in exactly one function:**
 

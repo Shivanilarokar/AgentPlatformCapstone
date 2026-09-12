@@ -48,7 +48,7 @@ class Endpoint:
     #: stdio: the command line. http/sse: the URL.
     target: str
     #: stdio only - env var the server reads its credential from
-    token_env: str | None = None
+    credential_env_var: str | None = None
     #: extra args for stdio commands
     args: list[str] = field(default_factory=list)
     #: none | api_key | oauth. "none" means a missing token is not a problem.
@@ -59,7 +59,7 @@ class Endpoint:
         cls,
         transport: str,
         endpoint: str,
-        token_env: str | None = None,
+        credential_env_var: str | None = None,
         auth_type: str = "none",
     ) -> "Endpoint":
         """From what a user typed into the registration form."""
@@ -75,11 +75,11 @@ class Endpoint:
             parts = shlex.split(cmdline)
             if not parts:
                 raise ValueError("a stdio endpoint needs a command")
-            return cls("stdio", parts[0], token_env, parts[1:], auth_type)
+            return cls("stdio", parts[0], credential_env_var, parts[1:], auth_type)
         if transport in ("http", "sse"):
             if not endpoint.startswith(("http://", "https://")):
                 raise ValueError(f"a {transport} endpoint must be a URL")
-            return cls(transport, endpoint, token_env, [], auth_type)
+            return cls(transport, endpoint, credential_env_var, [], auth_type)
         raise ValueError(f"unknown transport {transport!r}")
 
     @property
@@ -152,11 +152,11 @@ async def _connect(ep: Endpoint, token: str | None) -> AsyncIterator[ClientSessi
 
     if ep.transport == "stdio":
         env = dict(os.environ)
-        if ep.token_env:
+        if ep.credential_env_var:
             if token:
-                env[ep.token_env] = token  # the only place the plaintext travels
+                env[ep.credential_env_var] = token  # the only place the plaintext travels
             else:
-                env.pop(ep.token_env, None)
+                env.pop(ep.credential_env_var, None)
         params = StdioServerParameters(command=_resolve(ep.target), args=list(ep.args), env=env)
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:

@@ -63,7 +63,7 @@ export default function Shell() {
         {WORKSPACE.map(item)}
 
         <div className="nav-label">Shared</div>
-        {SHARED.filter((n) => !n.admin || me.role === "platform_admin").map(item)}
+        {SHARED.filter((n) => !n.admin || me.role === "admin").map(item)}
 
         <div className="sidebar-foot">
           <div className="who">
@@ -72,10 +72,16 @@ export default function Shell() {
               <div style={{ fontWeight: 550 }}>{me.name}</div>
               <div className="org">
                 {me.company}
-                {me.role === "platform_admin" ? " · platform admin" : me.role === "admin" ? " · admin" : ""}
+                {me.role === "admin" ? " · admin" : " · member"}
               </div>
             </div>
           </div>
+          {me.invite_code && (
+            <div className="faint" style={{ fontSize: 11.5, padding: "4px 12px 6px" }}
+                 title="Give this to a colleague: they sign up with your company name and this code, and join as a member.">
+              invite code <span className="mono">{me.invite_code}</span>
+            </div>
+          )}
           <a className="nav-item" href="#signout" onClick={signOut}>
             <span className="ic">↩</span>Sign out
           </a>

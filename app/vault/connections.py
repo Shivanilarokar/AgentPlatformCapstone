@@ -46,11 +46,11 @@ async def add(
         conn = Connection(server_name=server_name)
         session.add(conn)
 
-    conn.ciphertext = sealed.ciphertext
-    conn.nonce = sealed.nonce
-    conn.wrapped_dek = sealed.wrapped_dek
-    conn.dek_nonce = sealed.dek_nonce
-    conn.key_version = sealed.key_version
+    conn.encrypted_secret = sealed.encrypted_secret
+    conn.secret_nonce = sealed.secret_nonce
+    conn.encrypted_data_key = sealed.encrypted_data_key
+    conn.data_key_nonce = sealed.data_key_nonce
+    conn.master_key_version = sealed.master_key_version
     conn.status = "active"
     conn.added_by = added_by
     await session.flush()
@@ -60,7 +60,7 @@ async def add(
 async def revoke(session: AsyncSession, server_name: str) -> Connection:
     """Revoking must leave dependent agents DEGRADED, not crashed.
 
-    The row is kept, marked revoked, and its ciphertext wiped. An agent that
+    The row is kept, marked revoked, and its encrypted_secret wiped. An agent that
     needs it now gets "not connected" back as a tool result and carries on with
     whatever else it can do.
     """
@@ -71,8 +71,8 @@ async def revoke(session: AsyncSession, server_name: str) -> Connection:
         raise KeyError(server_name)
 
     conn.status = "revoked"
-    conn.ciphertext = b""
-    conn.wrapped_dek = b""
+    conn.encrypted_secret = b""
+    conn.encrypted_data_key = b""
     await session.flush()
     return conn
 
@@ -86,15 +86,15 @@ async def use(session: AsyncSession, *, tenant: str, server_name: str) -> str | 
     conn = await session.scalar(
         select(Connection).where(Connection.server_name == server_name)
     )
-    if conn is None or conn.status != "active" or not conn.ciphertext:
+    if conn is None or conn.status != "active" or not conn.encrypted_secret:
         return None
 
     sealed = envelope.SealedSecret(
-        ciphertext=conn.ciphertext,
-        nonce=conn.nonce,
-        wrapped_dek=conn.wrapped_dek,
-        dek_nonce=conn.dek_nonce,
-        key_version=conn.key_version,
+        encrypted_secret=conn.encrypted_secret,
+        secret_nonce=conn.secret_nonce,
+        encrypted_data_key=conn.encrypted_data_key,
+        data_key_nonce=conn.data_key_nonce,
+        master_key_version=conn.master_key_version,
     )
     try:
         secret = envelope.open_(sealed, tenant=tenant, server_name=server_name)

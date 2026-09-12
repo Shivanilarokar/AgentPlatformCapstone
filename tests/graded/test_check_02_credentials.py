@@ -39,7 +39,7 @@ async def workspace():
 
 def test_the_sealed_form_contains_no_trace_of_the_secret():
     sealed = envelope.seal(SENTINEL, tenant=TENANT, server_name=SERVER)
-    blob = sealed.ciphertext + sealed.nonce + sealed.wrapped_dek + sealed.dek_nonce
+    blob = sealed.encrypted_secret + sealed.secret_nonce + sealed.encrypted_data_key + sealed.data_key_nonce
     assert SENTINEL.encode() not in blob
     assert b"xoxb" not in blob
 
@@ -50,7 +50,7 @@ def test_it_round_trips_for_the_owner():
 
 
 def test_a_row_stolen_into_another_workspace_will_not_decrypt():
-    """The AAD binds ciphertext to tenant+server, so a copied row is inert."""
+    """The AAD binds encrypted_secret to tenant+server, so a copied row is inert."""
     sealed = envelope.seal(SENTINEL, tenant=TENANT, server_name=SERVER)
     with pytest.raises(envelope.VaultError):
         envelope.open_(sealed, tenant="someone_else", server_name=SERVER)
@@ -65,8 +65,8 @@ def test_a_row_reused_for_a_different_server_will_not_decrypt():
 def test_two_secrets_never_share_a_data_key():
     a = envelope.seal(SENTINEL, tenant=TENANT, server_name=SERVER)
     b = envelope.seal(SENTINEL, tenant=TENANT, server_name=SERVER)
-    assert a.wrapped_dek != b.wrapped_dek
-    assert a.ciphertext != b.ciphertext  # same plaintext, different ciphertext
+    assert a.encrypted_data_key != b.encrypted_data_key
+    assert a.encrypted_secret != b.encrypted_secret  # same plaintext, different encrypted_secret
 
 
 def test_an_empty_secret_is_refused():
@@ -128,8 +128,8 @@ async def test_revoking_wipes_the_ciphertext(workspace):
         await connections.add(s, tenant=TENANT, server_name=SERVER, secret=SENTINEL)
     async with tenant_session(TENANT) as s:
         conn = await connections.revoke(s, SERVER)
-        assert conn.ciphertext == b""
-        assert conn.wrapped_dek == b""
+        assert conn.encrypted_secret == b""
+        assert conn.encrypted_data_key == b""
 
 
 async def test_a_server_never_connected_is_simply_absent(workspace):

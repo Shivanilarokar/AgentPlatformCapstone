@@ -39,8 +39,8 @@ class ServerOut(BaseModel):
     endpoint: str
     auth_type: str
     description: str
-    status: str
-    scope: str  # private | shared
+    health: str  # ok | down
+    visibility: str  # private | shared
     shared_by: str
     connected: bool
     last_checked_at: str | None
@@ -54,7 +54,7 @@ class CatalogueOut(BaseModel):
     transport: str
     endpoint: str
     auth_type: str
-    token_env: str | None
+    credential_env_var: str | None
     description: str
     credential_hint: str
     homepage: str
@@ -69,7 +69,7 @@ class RegisterIn(BaseModel):
                           description="a URL, or a stdio command line")
     auth_type: str = Field(default="none", pattern=r"^(none|api_key|oauth)$")
     #: stdio + api_key: which env var the subprocess reads its credential from
-    token_env: str | None = Field(default=None, max_length=80)
+    credential_env_var: str | None = Field(default=None, max_length=80)
     description: str = Field(default="", max_length=500)
     #: "private" = just my workspace. "shared" = everyone; admins only.
     visibility: str = Field(default="private", pattern=r"^(private|shared)$")
@@ -86,8 +86,8 @@ def _out(v: registry.ServerView, connected: set[str]) -> ServerOut:
         endpoint=v.endpoint,
         auth_type=v.auth_type,
         description=v.description,
-        status=v.status,
-        scope=v.scope,
+        health=v.health,
+        visibility=v.visibility,
         shared_by=v.shared_by,
         # "connected" means an agent here can use it: a stored credential, or
         # a server that never needed one.
@@ -112,7 +112,7 @@ async def catalogue():
     return [
         CatalogueOut(
             name=s.name, transport=s.transport, endpoint=s.endpoint, auth_type=s.auth_type,
-            token_env=s.token_env, description=s.description,
+            credential_env_var=s.credential_env_var, description=s.description,
             credential_hint=s.credential_hint, homepage=s.homepage,
         )
         for s in CATALOGUE.values()
@@ -135,10 +135,10 @@ async def register_server(
             transport=body.transport,
             endpoint=body.endpoint,
             auth_type=body.auth_type,
-            token_env=body.token_env,
+            credential_env_var=body.credential_env_var,
             description=body.description,
-            scope=body.visibility,
-            shared_by=claims.tenant_slug if body.visibility == "shared" else "",
+            visibility=body.visibility,
+            shared_by=claims.tenant_key if body.visibility == "shared" else "",
             token=body.token,
         )
     except ValueError as exc:  # a malformed endpoint
@@ -154,8 +154,8 @@ async def register_server(
 
     if body.token:
         # Discovery worked with it, so it is this workspace's connection now.
-        # Encrypted on the way in; the plaintext leaves scope with this request.
-        await vault.add(db, tenant=claims.tenant_slug, server_name=body.name,
+        # Encrypted on the way in; the plaintext leaves visibility with this request.
+        await vault.add(db, tenant=claims.tenant_key, server_name=body.name,
                         secret=body.token, added_by=claims.email)
 
     return _out(view, await registry.connected_servers(db))
@@ -166,7 +166,7 @@ async def refresh_server(
     name: str, claims: Claims = Depends(current_user), db: AsyncSession = Depends(tenant_db)
 ):
     """Re-check now, with this workspace's own credential if it has one."""
-    token = await vault.use(db, tenant=claims.tenant_slug, server_name=name)
+    token = await vault.use(db, tenant=claims.tenant_key, server_name=name)
     try:
         await registry.refresh(db, name, token=token)
     except KeyError:

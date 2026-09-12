@@ -40,12 +40,12 @@ def _psycopg_dsn() -> str:
     return settings.database_url.replace("postgresql+psycopg://", "postgresql://")
 
 
-async def checkpointer_for(tenant_slug: str) -> AsyncPostgresSaver:
+async def checkpointer_for(tenant_key: str) -> AsyncPostgresSaver:
     """The saver for one company. Built once, then reused."""
-    if (saver := _savers.get(tenant_slug)) is not None:
+    if (saver := _savers.get(tenant_key)) is not None:
         return saver
 
-    schema = schema_for(tenant_slug)  # validated before it reaches a DSN
+    schema = schema_for(tenant_key)  # validated before it reaches a DSN
 
     pool = AsyncConnectionPool(
         conninfo=_psycopg_dsn(),
@@ -65,8 +65,8 @@ async def checkpointer_for(tenant_slug: str) -> AsyncPostgresSaver:
     saver = AsyncPostgresSaver(pool)
     await saver.setup()  # CREATE TABLE ... inside `schema`, not public
 
-    _pools[tenant_slug] = pool
-    _savers[tenant_slug] = saver
+    _pools[tenant_key] = pool
+    _savers[tenant_key] = saver
     log.info("checkpointer ready for %s", schema)
     return saver
 

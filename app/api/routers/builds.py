@@ -50,7 +50,7 @@ class BuildOut(BaseModel):
 
 
 async def _graph(claims: Claims):
-    return build_graph(await checkpointer_for(claims.tenant_slug))
+    return build_graph(await checkpointer_for(claims.tenant_key))
 
 
 def _shape(thread_id: str, result: dict[str, Any]) -> BuildOut:
@@ -80,7 +80,7 @@ async def start_build(body: StartIn, claims: Claims = Depends(current_user)):
     thread_id = f"build-{uuid.uuid4().hex[:12]}"
     graph = await _graph(claims)
     result = await graph.ainvoke(
-        {"prompt": body.prompt, "tenant": claims.tenant_slug, "log": []},
+        {"prompt": body.prompt, "tenant": claims.tenant_key, "log": []},
         config={"configurable": {"thread_id": thread_id}},
     )
     return _shape(thread_id, result)
@@ -113,7 +113,7 @@ async def build_from_form(body: FormIn, claims: Claims = Depends(current_user)):
     cfg = {"configurable": {"thread_id": thread_id}}
 
     result = await graph.ainvoke(
-        {"prompt": body.prompt, "tenant": claims.tenant_slug, "log": []}, config=cfg
+        {"prompt": body.prompt, "tenant": claims.tenant_key, "log": []}, config=cfg
     )
 
     # Answer whatever the graph stops on, up to a small bound so a loop cannot

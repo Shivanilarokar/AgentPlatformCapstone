@@ -67,7 +67,7 @@ class BuildState(TypedDict, total=False):
     selected: list[str]  # tool refs the USER chose
 
     # from check_connections()
-    required: list[str]  # server slugs
+    required: list[str]  # server names
     missing: list[str]  # of those, the ones with no active connection
 
     # the result

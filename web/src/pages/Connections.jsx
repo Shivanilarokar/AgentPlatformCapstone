@@ -222,7 +222,7 @@ export default function Connections() {
         <SectionTitle>Revoking</SectionTitle>
         <Card>
           <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
-            Revoking wipes the ciphertext but keeps the row. An agent that needed it goes{" "}
+            Revoking wipes the encrypted_secret but keeps the row. An agent that needed it goes{" "}
             <Badge tone="danger" dot>degraded</Badge> — it still answers, still uses its other
             tools, and reports the one that is broken. It must not crash.
           </p>

@@ -80,8 +80,8 @@ async def two_workspaces():
         await drop_tenant(t)
         await create_tenant(t)
     async with platform_session() as s:
-        await s.execute(delete(Tenant).where(Tenant.slug.in_([A, B])))
-        s.add_all([Tenant(name=A, slug=A), Tenant(name=B, slug=B)])
+        await s.execute(delete(Tenant).where(Tenant.schema_key.in_([A, B])))
+        s.add_all([Tenant(name=A, schema_key=A), Tenant(name=B, schema_key=B)])
 
     yield
 
@@ -91,7 +91,7 @@ async def two_workspaces():
         mine = select(SharedServer.id).where(SharedServer.shared_by.in_([A, B]))
         await s.execute(delete(SharedTool).where(SharedTool.server_id.in_(mine)))
         await s.execute(delete(SharedServer).where(SharedServer.shared_by.in_([A, B])))
-        await s.execute(delete(Tenant).where(Tenant.slug.in_([A, B])))
+        await s.execute(delete(Tenant).where(Tenant.schema_key.in_([A, B])))
     for t in (A, B):
         await drop_tenant(t)
 
@@ -189,7 +189,7 @@ async def test_refresh_marks_a_dead_server_down_and_a_live_one_ok(two_workspaces
     async with tenant_session(A) as s:
         assert await registry.refresh(s, NAME) == "down"
         row = await s.scalar(select(McpServer).where(McpServer.name == NAME))
-        assert row.status == "down"
+        assert row.health == "down"
 
     # repair it: the next check brings it back
     async with tenant_session(A) as s:
@@ -222,13 +222,13 @@ async def test_a_shared_server_is_visible_to_every_company(two_workspaces, files
     async with tenant_session(A) as s:
         view = await registry.register(
             s, name=NAME, transport="stdio", endpoint=filesystem,
-            scope="shared", shared_by=A,
+            visibility="shared", shared_by=A,
         )
-    assert view.scope == "shared"
+    assert view.visibility == "shared"
 
     for tenant in (A, B):
         async with tenant_session(tenant) as s:
-            seen = {v.name: v.scope for v in mine(await registry.list_servers(s))}
+            seen = {v.name: v.visibility for v in mine(await registry.list_servers(s))}
             assert seen == {NAME: "shared"}
 
 
@@ -236,23 +236,23 @@ async def test_a_private_server_shadows_a_shared_one_with_the_same_name(two_work
     """A company can override a shared entry with its own copy."""
     async with tenant_session(A) as s:
         await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem,
-                               scope="shared", shared_by=A)
+                               visibility="shared", shared_by=A)
     async with tenant_session(B) as s:
         await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem,
                                description="Helios' own")
     async with tenant_session(B) as s:
         views = mine(await registry.list_servers(s))
-        assert len(views) == 1 and views[0].scope == "private"
+        assert len(views) == 1 and views[0].visibility == "private"
         assert views[0].description == "Helios' own"
 
 
-def test_only_a_platform_admin_can_share():
+def test_only_a_company_admin_can_share():
     from app.core.security import Claims
 
-    company_admin = Claims("u", "t", "helios", "tom@x", "Tom", "admin")
-    platform_admin = Claims("u", "t", "northwind", "priya@x", "Priya", "platform_admin")
-    assert not company_admin.is_admin and company_admin.is_workspace_admin
-    assert platform_admin.is_admin and platform_admin.is_workspace_admin
+    member = Claims("u", "t", "helios", "tom@x", "Tom", "member")
+    admin = Claims("u", "t", "northwind", "priya@x", "Priya", "admin")
+    assert not member.is_admin
+    assert admin.is_admin
 
 
 def test_a_windows_path_survives_parsing():
