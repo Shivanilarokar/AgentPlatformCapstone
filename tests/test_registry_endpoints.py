@@ -81,7 +81,7 @@ async def two_workspaces():
         await create_tenant(t)
     async with platform_session() as s:
         await s.execute(delete(Tenant).where(Tenant.schema_key.in_([A, B])))
-        s.add_all([Tenant(name=A, schema_key=A), Tenant(name=B, schema_key=B)])
+        s.add_all([Tenant(name=A, schema_key=A, invite_code="test"), Tenant(name=B, schema_key=B, invite_code="test")])
 
     yield
 
