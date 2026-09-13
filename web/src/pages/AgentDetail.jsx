@@ -220,21 +220,49 @@ function Overview({ a }) {
 }
 
 function ConnectionsTab({ a }) {
+  const [servers, setServers] = useState(null);
+  useEffect(() => { get("/v1/servers").then(setServers).catch(() => setServers([])); }, []);
+  const byName = Object.fromEntries((servers ?? []).map((s) => [s.name, s]));
+  const status = (name) => {
+    const s = byName[name];
+    if (!servers) return ["", "…"];
+    if (!s) return ["danger", "not in your registry"];
+    if (s.health !== "ok") return ["danger", "server down"];
+    if (s.auth_type === "none") return ["ok", "no credential needed"];
+    return s.connected ? ["ok", "active"] : ["warn", "not connected"];
+  };
+  const missing = servers ? a.config.requires_connections.filter((n) => status(n)[0] !== "ok") : [];
+
   return (
     <>
+      {a.installed_from && (
+        <Note style={{ marginBottom: 14, maxWidth: 820 }}>
+          <b>Installed from the Marketplace.</b> This is your own copy. It runs with <b>your</b>
+          credentials — the publisher's were never included.
+          {missing.length > 0 && <> Connect <b>{missing.join(", ")}</b> below to use it.</>}
+        </Note>
+      )}
       <Card style={{ padding: 0, maxWidth: 820 }}>
         <table className="t">
-          <thead><tr><th>Server</th><th>Used by this agent</th></tr></thead>
+          <thead><tr><th>Server</th><th>Status</th><th>Used by this agent</th><th></th></tr></thead>
           <tbody>
-            {a.config.requires_connections.map((name) => (
-              <tr key={name}>
-                <td><b>{name}</b></td>
-                <td className="mono" style={{ fontSize: 12 }}>
-                  {a.config.tools.filter((t) => t.requires_connection === name)
-                    .map((t) => t.ref.split(".")[1]).join(", ")}
-                </td>
-              </tr>
-            ))}
+            {a.config.requires_connections.map((name) => {
+              const [tone, label] = status(name);
+              return (
+                <tr key={name}>
+                  <td><b>{name}</b> <span className="faint mono" style={{ fontSize: 11.5 }}>{byName[name]?.auth_type ?? ""}</span></td>
+                  <td><Badge tone={tone} dot>{label}</Badge></td>
+                  <td className="mono" style={{ fontSize: 12 }}>
+                    {a.config.tools.filter((t) => t.requires_connection === name)
+                      .map((t) => t.ref.split(".")[1]).join(", ")}
+                  </td>
+                  <td>
+                    {tone === "warn" && <Link className="btn primary sm" to={`/connections?add=${name}`}>Connect</Link>}
+                    {tone === "danger" && !byName[name] && <Link className="btn sm" to="/registry">Register</Link>}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </Card>
@@ -250,15 +278,6 @@ function ConnectionsTab({ a }) {
         It must not crash.
       </Note>
     </>
-  );
-}
-
-function NotYet({ step, what, children }) {
-  return (
-    <div style={{ maxWidth: 760 }}>
-      <Note><b>Not built yet — step {step}.</b> {what}</Note>
-      {children}
-    </div>
   );
 }
 

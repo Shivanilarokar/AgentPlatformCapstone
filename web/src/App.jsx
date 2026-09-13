@@ -24,6 +24,7 @@ export default function App() {
         <Route path="/connections" element={<Connections />} />
 
         <Route path="/marketplace" element={<Marketplace />} />
+        <Route path="/marketplace/:id" element={<Marketplace />} />
         <Route path="/review" element={<AdminReview />} />
 
         <Route index element={<Navigate to="/registry" replace />} />

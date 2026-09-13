@@ -9,8 +9,10 @@ Platform admin only:
     GET  /v1/review                        the queue, across every company
     POST /v1/review/{submission}/decide    approve | changes | reject (+ notes) -> resumes the run
 
-Everyone:
+Everyone with a workspace:
     GET  /v1/listings                      the marketplace
+    GET  /v1/listings/{id}                 one listing, plus which connections I already have
+    POST /v1/listings/{id}/install         copy the design into MY workspace as MY agent
 """
 
 from __future__ import annotations
@@ -92,6 +94,18 @@ class ListingOut(BaseModel):
     tools: list[dict]
     topology: str
     published_at: str
+
+
+class ListingDetail(ListingOut):
+    config: dict
+    #: server name -> "connected" | "needs_credential" | "no_credential_needed" | "not_registered"
+    connections: dict[str, str]
+
+
+class InstallOut(BaseModel):
+    agent_id: str
+    name: str
+    needs: list[str]  # servers the installer still has to connect
 
 
 def _sub_out(s: Submission) -> SubmissionOut:
@@ -235,3 +249,59 @@ async def decide(submission_id: UUID, body: DecideIn, _: Claims = Depends(requir
 async def listings(_: Claims = Depends(current_user), db: AsyncSession = Depends(platform_db)):
     rows = await db.scalars(select(Listing).order_by(Listing.published_at.desc()))
     return [_listing_out(l) for l in rows]
+
+
+async def _connection_status(db: AsyncSession, cfg: dict) -> dict[str, str]:
+    """For each server the design needs: what THIS person has. Their registry
+    (shared + company + own) and their own credentials; nobody else's."""
+    from app.mcp_registry import registry
+
+    views = {v.name: v for v in await registry.list_servers(db)}
+    connected = await registry.connected_servers(db)
+    out: dict[str, str] = {}
+    for name in cfg.get("requires_connections", []):
+        v = views.get(name)
+        if v is None:
+            out[name] = "not_registered"
+        elif v.auth_type == "none":
+            out[name] = "no_credential_needed"
+        elif name in connected:
+            out[name] = "connected"
+        else:
+            out[name] = "needs_credential"
+    return out
+
+
+@router.get("/v1/listings/{listing_id}", response_model=ListingDetail)
+async def listing(listing_id: UUID, claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db)):
+    async with platform_session() as p:
+        row = await p.get(Listing, listing_id)
+        if row is None:
+            raise HTTPException(404, detail=NOT_FOUND)
+        base = _listing_out(row)
+        config = row.config
+    return ListingDetail(**base.model_dump(), config=config,
+                         connections=await _connection_status(db, config))
+
+
+@router.post("/v1/listings/{listing_id}/install", response_model=InstallOut, status_code=201)
+async def install(listing_id: UUID, claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db)):
+    """Step 6. The sanitized design becomes a brand-new agent in MY schema, owned
+    by me (row-level security stamps the owner). It references servers by NAME,
+    so it resolves to MY connections at run time. The publisher's agent, runs
+    and credentials are not touched - they are not even reachable from here."""
+    async with platform_session() as p:
+        row = await p.get(Listing, listing_id)
+        if row is None:
+            raise HTTPException(404, detail=NOT_FOUND)
+        cfg = AgentConfig.model_validate(row.config)  # still a valid design after sanitizing
+        row.installs += 1
+        config, name = row.config, row.name
+
+    agent = Agent(name=name, config=config, status="draft", installed_from=listing_id)
+    db.add(agent)
+    await db.flush()
+
+    status = await _connection_status(db, config)
+    needs = [n for n, st in status.items() if st in ("needs_credential", "not_registered")]
+    return InstallOut(agent_id=str(agent.id), name=cfg.name, needs=needs)

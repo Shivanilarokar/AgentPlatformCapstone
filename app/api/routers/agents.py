@@ -34,6 +34,7 @@ class AgentCard(BaseModel):
     last_run_at: str | None = None
     quality_score: int | None = None
     safety_grade: str | None = None
+    installed_from: str | None = None
 
 
 class AgentDetail(AgentCard):
@@ -54,6 +55,7 @@ def _card(row: Agent) -> AgentCard:
         guarded=[t.ref for t in cfg.guarded_tools],
         topology=str(cfg.topology.type),
         created_at=row.created_at.isoformat() if row.created_at else "",
+        installed_from=str(row.installed_from) if row.installed_from else None,
     )
 
 

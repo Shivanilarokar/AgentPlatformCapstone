@@ -41,6 +41,9 @@ class Agent(Base):
     name: Mapped[str] = mapped_column(String(120))
     config: Mapped[dict] = mapped_column(JSONB, default=dict)  # the AgentConfig document (app/builder/schema.py)
     status: Mapped[str] = mapped_column(String(20), default="draft")
+    #: set when this agent was installed from the marketplace: the listing it
+    #: was copied from. The original is never touched.
+    installed_from: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True), nullable=True)
     #: the last computed score, with every check behind it (app/scoring)
     quality_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     safety_grade: Mapped[str | None] = mapped_column(String(1), nullable=True)

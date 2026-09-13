@@ -20,7 +20,7 @@ Read `docs/ARCHITECTURE.md` first (plain language, why each decision), then `doc
 | 3 Describe an agent | ✅ | Builder graph with two LangGraph interrupts (`select_tools`, `missing_connection`); survives `docker compose restart api`; form mode drives the *same* graph; the result card shows the score. | `app/builder/schema.py` (`AgentConfig`) · `app/builder/graph.py` · `app/api/routers/builds.py` · `app/tenancy/checkpointers.py` · `web/src/pages/Build.jsx` |
 | 4 Test it | ✅ except API tab | Agent page, graph from config, tools table, **Playground** (chat; a write tool pauses the run and shows Approve / Reject inline; survives an API restart; 👍/👎), **Runs** tab, **Scores** (quality 0–100 from six checks, safety A–D from five; each with its reason; `blocked_by` names why it cannot be published). **No API tab.** | `app/api/routers/runs.py` · `app/scoring/score.py` · `app/api/routers/agents.py` (`/scores`) · `web/src/pages/Playground.jsx` · `web/src/pages/AgentDetail.jsx` — pending: API tab |
 | 5 Publish it | ✅ | Settings tab: Publish is disabled below the threshold and says why; above it, the author sees exactly what will leave (allowlist projection + scrubber), then a publish graph starts and **parks on `admin_review`** in the author's company checkpoints. The platform admin's **Admin Review** queue approves / requests changes / rejects — resuming that run, across restarts. Approval is the only way into `platform.listings`. | `app/publishing/sanitize.py` · `app/publishing/graph.py` · `app/api/routers/publishing.py` · `Submission` / `SubmissionIndex` / `Listing` models · `web/src/pages/Settings.jsx` · `web/src/pages/AdminReview.jsx` |
-| 6 Someone else installs it | ⚠️ half | Marketplace lists approved designs (`GET /v1/listings`, `web/src/pages/Marketplace.jsx`). **Install not built.** | pending: install endpoint (copy the sanitized config into the installer's schema, then ask for their own connections) |
+| 6 Someone else installs it | ✅ | Marketplace lists approved designs; a listing page shows what it needs from *you* (connected / needs credential / no credential); **Add to my workspace** copies the sanitized design into the installer's schema as their own agent (`installed_from` set, `installs` counted) and lands on its Connections tab to connect their own credentials. The publisher's agent, runs and tokens are untouched and unreachable. | `app/api/routers/publishing.py` (`/v1/listings/{id}`, `/install`) · `web/src/pages/Marketplace.jsx` · Connections tab in `AgentDetail.jsx` · `tests/graded/test_step_06_install.py` |
 
 Cross-cutting, already done: `app/core/db.py` + `app/api/deps.py` (tenant gate), `app/core/security.py` +
 `app/api/routers/auth.py` (sign-up / sign-in), `app/tenancy/provision.py` (schema per company),
@@ -57,7 +57,6 @@ Cross-cutting, already done: `app/core/db.py` + `app/api/deps.py` (tenant gate),
 
 | # | Build | Unlocks | Files to create / touch | Est. | Owner |
 |---|---|---|---|---|---|
-| 4 | **Install** — copy a listing's sanitized config into the installer's schema as a new agent, then walk them through connecting each `requires_connections` server with their own credentials | step 6 | `POST /v1/listings/{id}/install` in `app/api/routers/publishing.py` · `Marketplace.jsx` button | ¼ day | |
 | 5 | **Public API + Postman** — `/v1/agents/{id}/invoke`, `/stream`, `/resume`; Postman v2.1 download with the caller's own token pre-filled | check 8 | `app/api/routers/public.py`, `app/api/postman.py` (new) · `ApiToken` model in `platform_.py` · API tab in `AgentDetail.jsx` | ½ day | |
 | 6 | **Alembic** — two trees (platform, tenant template) + `migrate_all.py` | replaces `reset_db.py` | `alembic/platform/`, `alembic/tenant/` (new) · `scripts/migrate_all.py` · call from `app/tenancy/provision.py` | ½ day | |
 
@@ -341,6 +340,7 @@ uv run python scripts/inspect_db.py                                         # ev
 | | `added_by` | email of the person who pasted it |
 | | `last_used_at` | last time a tool call or health check borrowed it |
 | `t_*.agents` | `config` | the whole `AgentConfig` document (JSONB) — the agent *is* this |
+| | `installed_from` | the marketplace listing this agent was copied from, if any |
 | | `quality_score` / `safety_grade` / `checks` | the last computed score and every check behind it (`app/scoring/score.py`); recomputed whenever shown |
 | `t_*.submissions` | `listing` / `score` / `notes` / `status` | the sanitized design frozen at submit time, the score then, the admin's words back, `pending`·`approved`·`changes_requested`·`rejected` |
 | `platform.submission_index` | | the one cross-company row: which company, which parked thread, the sanitized listing — what the platform admin's queue reads |

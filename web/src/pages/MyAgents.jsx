@@ -21,6 +21,7 @@ function AgentCard({ a }) {
       <div className="tools">
         {a.servers.map((s) => <span className="chip" key={s}>{s}</span>)}
         {a.topology === "supervisor" && <Badge tone="accent">multi-agent</Badge>}
+        {a.installed_from && <Badge>installed</Badge>}
       </div>
       <div className="foot">
         <div className="scores">
