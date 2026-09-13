@@ -35,11 +35,9 @@ HEALTH_INTERVAL_SECONDS = 300  # five minutes
 _task: asyncio.Task | None = None
 
 
-async def check_everything() -> dict[str, str]:
-    """One sweep. Returns {name: status} so a caller can see what it did."""
+async def check_shared() -> dict[str, str]:
+    """Servers shared with everyone: one pass, they belong to nobody in particular."""
     results: dict[str, str] = {}
-
-    # --- shared servers: one pass, they belong to nobody in particular -----
     async with platform_session() as s:
         for srv in await s.scalars(select(SharedServer)):
             try:
@@ -47,29 +45,40 @@ async def check_everything() -> dict[str, str]:
             except Exception as exc:  # noqa: BLE001 - one bad server must not stop the sweep
                 log.warning("health: shared %s: %s", srv.name, exc)
                 results[f"shared/{srv.name}"] = "error"
+    return results
 
-    # --- every company's private servers, one schema at a time --------------
+
+async def check_tenant(tenant_key: str) -> dict[str, str]:
+    """Every person's private servers in ONE company, each with its owner's credential."""
+    results: dict[str, str] = {}
+    # system=True: the sweep sees every person's servers in this schema
+    async with tenant_session(tenant_key, system=True) as s:
+        for srv in await s.scalars(select(McpServer)):
+            try:
+                # The OWNER's credential, borrowed for one tools/list, then dropped.
+                token = await vault.use(s, tenant=tenant_key, user_id=str(srv.owner_id),
+                                        server_name=srv.name)
+                results[f"{tenant_key}/{srv.name}"] = await registry.refresh(
+                    s, srv.name, token=token, server_id=srv.id
+                )
+                del token
+            except Exception as exc:  # noqa: BLE001
+                log.warning("health: %s/%s: %s", tenant_key, srv.name, exc)
+                results[f"{tenant_key}/{srv.name}"] = "error"
+    return results
+
+
+async def check_everything() -> dict[str, str]:
+    """One sweep. Returns {name: health} so a caller can see what it did."""
+    results = await check_shared()
+
     async with engine.connect() as conn:
         keys = [r[0] for r in await conn.execute(text(
             'SELECT schema_key FROM platform.tenants ORDER BY schema_key'
         ))]
-
     for tenant_key in keys:
         try:
-            # system=True: the sweep sees every person's servers in this schema
-            async with tenant_session(tenant_key, system=True) as s:
-                for srv in await s.scalars(select(McpServer)):
-                    try:
-                        # The OWNER's credential, borrowed for one tools/list, then dropped.
-                        token = await vault.use(s, tenant=tenant_key, user_id=str(srv.owner_id),
-                                                server_name=srv.name)
-                        results[f"{tenant_key}/{srv.name}"] = await registry.refresh(
-                            s, srv.name, token=token, server_id=srv.id
-                        )
-                        del token
-                    except Exception as exc:  # noqa: BLE001
-                        log.warning("health: %s/%s: %s", tenant_key, srv.name, exc)
-                        results[f"{tenant_key}/{srv.name}"] = "error"
+            results.update(await check_tenant(tenant_key))
         except Exception as exc:  # noqa: BLE001 - a broken schema must not stop the sweep
             log.warning("health: tenant %s: %s", tenant_key, exc)
 

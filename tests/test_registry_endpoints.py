@@ -208,8 +208,8 @@ async def test_the_sweep_visits_every_workspace(two_workspaces, filesystem):
 
     async with tenant_session(A, ANNE) as s:
         await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem)
-    results = await health.check_everything()
-    assert f"{A}/{NAME}" in results
+    results = await health.check_tenant(A)  # not check_everything: that would also
+    assert f"{A}/{NAME}" in results            # re-check the dev database's real shared servers from here
 
 
 # --------------------------------------------------- 5. shared versus private
@@ -280,7 +280,7 @@ async def test_the_sweep_sees_every_persons_servers(two_workspaces, filesystem):
         await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem)
     async with tenant_session(A, ARUN) as s:
         await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem)
-    results = await health.check_everything()
+    results = await health.check_tenant(A)
     assert sum(1 for k in results if k == f"{A}/{NAME}") >= 1
 
 
