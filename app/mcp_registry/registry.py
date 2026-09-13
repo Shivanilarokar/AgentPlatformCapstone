@@ -204,7 +204,7 @@ async def register(
 
 async def refresh(
     session: AsyncSession, name: str, token: str | None = None, *, shared: bool = False,
-    server_id=None,
+    private_only: bool = False, server_id=None,
 ) -> str:
     """Re-ask a known server what it has; mark it down if it has gone away.
 
@@ -221,7 +221,7 @@ async def refresh(
         if server_id is not None:  # the sweep names the exact row; a person sees only theirs anyway
             q = q.where(McpServer.id == server_id)
         server = await session.scalar(q)
-    if server is None:
+    if server is None and not private_only:
         server = await session.scalar(select(SharedServer).where(SharedServer.name == name))
         tool_cls, fk = SharedTool, SharedTool.server_id
     if server is None:

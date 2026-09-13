@@ -187,21 +187,32 @@ async def register_server(body: RegisterIn, claims: Claims = Depends(current_use
 
 @router.post("/{name}/refresh", response_model=ServerOut)
 async def refresh_server(name: str, claims: Claims = Depends(current_user)):
-    """Re-check now, with my own credential if I have one."""
-    async with _session(claims) as db:
-        if claims.is_platform_admin:
-            token, shared = None, True
-        else:
+    """Re-check now. My own server: with my credential, in my session. A server
+    shared with everyone: through the platform session, the same way the
+    scheduled sweep does it - a company's role may only READ that table."""
+    if not claims.is_platform_admin:
+        async with tenant_session(claims.tenant_key, claims.user_id) as db:
             token = await vault.use(db, tenant=claims.tenant_key, user_id=claims.user_id,
                                     server_name=name)
-            shared = False
-        try:
-            await registry.refresh(db, name, token=token, shared=shared)
-        except KeyError:
-            raise HTTPException(404, detail=NOT_FOUND) from None
-        finally:
-            del token
-        await db.flush()
+            try:
+                await registry.refresh(db, name, token=token, private_only=True)
+                await db.flush()
+                mine = True
+            except KeyError:
+                mine = False
+            finally:
+                del token
+    else:
+        mine = False
+
+    if not mine:
+        async with platform_session() as db:
+            try:
+                await registry.refresh(db, name, token=None, shared=True)
+            except KeyError:
+                raise HTTPException(404, detail=NOT_FOUND) from None
+
+    async with _session(claims) as db:
         views = await (registry.list_shared(db) if claims.is_platform_admin
                        else registry.list_servers(db))
         view = next((v for v in views if v.name == name), None)

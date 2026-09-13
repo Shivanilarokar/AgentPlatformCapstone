@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -20,6 +21,8 @@ async def lifespan(app: FastAPI):
     await close_all()
     await engine.dispose()
 
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 app = FastAPI(title="Agent Platform", lifespan=lifespan)
 
