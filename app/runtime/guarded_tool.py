@@ -41,7 +41,7 @@ def redact(args: dict[str, Any]) -> dict[str, Any]:
 class RunContext:
     """Who this run belongs to, and how it gets its credentials.
 
-    `resolve_token` takes a SERVER SLUG and returns that tenant's own plaintext
+    `resolve_token` takes a SERVER NAME and returns this person's own plaintext
     token, or None if they have not connected it. The server name is what travels in a
     configuration; the token never does.
 
@@ -53,7 +53,7 @@ class RunContext:
     tenant_id: str
     thread_id: str
     resolve_token: Callable[[str], Awaitable[str | None]]
-    #: SERVER SLUG -> how to reach it. In the app this reads the registry
+    #: SERVER NAME -> how to reach it. In the app this reads the registry
     #: (private, then shared); scripts use the catalogue.
     resolve_endpoint: Callable[[str], Awaitable[Endpoint | None]]
 

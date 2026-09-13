@@ -28,7 +28,7 @@ from sqlalchemy import text  # noqa: E402
 
 from app.core.db import engine  # noqa: E402
 from app.models.platform_ import PLATFORM_SCHEMA  # noqa: E402
-from app.tenancy.provision import bootstrap_platform  # noqa: E402
+from app.tenancy.provision import bootstrap_platform, ensure_platform_admin  # noqa: E402
 
 
 async def main() -> int:
@@ -44,7 +44,8 @@ async def main() -> int:
             print(f"  dropped {schema}")
 
     await bootstrap_platform()
-    print(f"\n  rebuilt {PLATFORM_SCHEMA}")
+    await ensure_platform_admin()
+    print(f"\n  rebuilt {PLATFORM_SCHEMA}; platform admin re-seeded from .env")
     print("  every workspace is gone - sign up again at http://localhost:5173\n")
 
     await engine.dispose()

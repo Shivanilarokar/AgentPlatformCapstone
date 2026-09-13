@@ -181,8 +181,21 @@ The app connects as `forge_app`, a role created **without** superuser and with `
 is kept for pgAdmin only. The health sweep is the one thing that sees every row in a schema; it sets
 `app.role = 'system'`, which the policies allow, and it never runs from a request.
 
-Tests: `tests/graded/test_check_01_isolation.py` covers company-vs-company **and** colleague-vs-
-colleague, including "a session that forgot to identify the person sees zero rows, not all rows".
+Verify it yourself, three ways:
+
+```bash
+uv run python scripts/verify_isolation.py   # 18 checks over HTTP against the running stack
+uv run pytest -q tests/graded/test_check_01_isolation.py   # the same at the SQL layer, incl. RLS edge cases
+```
+
+```sql
+-- in pgAdmin (superuser, so you see everything) - prove the rows carry owners:
+SELECT s.name, s.visibility, u.email AS owner FROM t_northwind_labs.mcp_servers s
+JOIN platform.users u ON u.id = s.owner_id;
+-- and that the app's role cannot bypass RLS:
+SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname IN ('forge', 'forge_app');
+SELECT tablename, rowsecurity, forcerowsecurity FROM pg_tables WHERE schemaname = 't_northwind_labs';
+```
 
 What is set up right now:
 
@@ -349,7 +362,7 @@ app/
   vault/      envelope.py (the only place plaintext exists), service.py, resolver.py
   server.py   FastAPI app, lifespan (bootstrap platform schema, start health sweep)
 web/src/           React + Vite: pages/ (SignIn, Registry, Connections, Build, MyAgents, AgentDetail)
-scripts/           reset_db.py · inspect_db.py · run_agent.py (run a config from the terminal)
+scripts/           reset_db.py · inspect_db.py · verify_isolation.py · run_agent.py
 tests/             graded/ (one file per implemented check) · fixtures/ (two sample configs)
 docker/pgadmin/    pre-registered server + password for pgAdmin
 docs/              ARCHITECTURE.md · DESIGN.md · architecture.drawio

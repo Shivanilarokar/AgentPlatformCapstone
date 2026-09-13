@@ -21,8 +21,8 @@ Who touches the system and what crosses the boundary.
 
 ```mermaid
 graph TB
-    MEM["<b>Member</b><br/>builds and tests agents"]
-    ADM["<b>Platform admin</b><br/>guards the marketplace"]
+    MEM["<b>User / company admin</b><br/>builds and tests agents"]
+    ADM["<b>Platform admin</b><br/>shares servers with everyone,<br/>guards the marketplace"]
     DEV["<b>Engineering team</b><br/>calls agents from code"]
 
     SYS["<b>AGENT PLATFORM</b><br/>builds, runs, scores and<br/>publishes agents from configuration"]
@@ -123,9 +123,12 @@ no way to get a session except from the gate.
 
 | Concern | Decision |
 |---|---|
-| Model | One database, one **schema per tenant** (`t_<uuid-hex>`) + one shared `platform` schema |
+| Model | One database, one **schema per company** (`t_<schema_key>`) + one shared `platform` schema |
 | Selection | `SET LOCAL search_path = t_x, platform` inside a per-request transaction |
 | Enforcement | Unqualified table names. **No `WHERE tenant_id` exists in the codebase to delete** |
+| Person layer | Row-level security on `agents`, `connections`, `mcp_servers`: `set_config('app.user_id', …)` per request; policy `owner_id = current_setting('app.user_id')`; `owner_id` defaults to that setting on INSERT. **No `WHERE owner_id` exists either** |
+| DB role | The app connects as `forge_app` — `NOSUPERUSER NOBYPASSRLS` — because a superuser bypasses RLS silently (`docker/db/init.sql`) |
+| Roles | `platform_admin` (one, from .env, no company) · `admin` (created the company; may share a server company-wide) · `user` |
 | Checkpoints | Live inside each tenant schema — closes the `thread_id`-only hole RLS would leave |
 | Shared data | `platform.listings` (marketplace) and `platform.submission_index` (admin routing) |
 | Not-found | Zero rows → `404`, never `403`, with a byte-identical body for unknown/malformed/cross-tenant |
@@ -147,8 +150,8 @@ Every row answers: *what problem does this solve, and what breaks if we swap it?
 | **Checkpointer** | **`AsyncPostgresSaver`** | Writes graph state to Postgres, so a pause survives a restart and a weekend. One per tenant schema. | `InMemorySaver` fails checks 5 and 6 the moment the container restarts. |
 | **Model layer** | **`langchain.init_chat_model`** | One call swaps provider, so `model.provider` in the config is honoured and we keep a **fallback key for the live demo**. | Calling a provider SDK directly means a rewrite to switch when a free tier rate-limits mid-presentation. |
 | **Tools** | **MCP Python SDK** | Rule 1 of the flow: the platform must **ask a server what tools it has**. `tools/list` + `tools/call` is exactly that. | Hardcoding tool names fails step 1 outright — "the registry would be a lie the moment a server changed". |
-| **Crypto** | **`cryptography`, AES-256-GCM** | AEAD with **AAD** = `tenant_id‖server_id`, so a encrypted_secret row copied to another schema will not decrypt. | Fernet has no AAD, so a stolen row decrypts anywhere. |
-| **Auth** | **PyJWT + argon2-cffi** | `tenant_id` and `role` travel in the token, which is what the gate reads. Stateless → no extra DB round trip per request. | Server sessions add a lookup before you can even pick a schema. |
+| **Crypto** | **`cryptography`, AES-256-GCM** | AEAD with **AAD** = `company‖person‖server`, so a ciphertext row copied to another schema, another person, or relabelled as another server will not decrypt. | Fernet has no AAD, so a stolen row decrypts anywhere. |
+| **Auth** | **PyJWT + argon2-cffi** | `tenant_key`, `user_id` and `role` travel in the token, which is what the gate reads. Stateless → no extra DB round trip per request. | Server sessions add a lookup before you can even pick a schema. |
 | **Frontend** | **React + Vite** | The playground needs **SSE streaming** and optimistic approval UI; the mockups are already component-shaped (one card reused in 3 places). | Server-rendered templates make the build chat and the streaming playground awkward. |
 | **Packaging** | **Docker Compose** | Grading runs `docker compose up`. Not optional. | — |
 
@@ -397,7 +400,7 @@ sequenceDiagram
     API-->>T: cards[]
 
     T->>API: POST /v1/listings/m3/install
-    API->>API: SET LOCAL search_path = t_helios, platform
+    API->>API: SET LOCAL search_path = t_helios, platform; set_config(app.user_id)
     API->>DB: SELECT sanitized_config FROM platform.listings
     API->>DB: INSERT INTO agents (config, status='draft', source_listing_id)
     Note right of DB: lands in t_helios.<br/>Priya's row is untouched.
@@ -422,14 +425,14 @@ erDiagram
     TENANTS {
         uuid id PK
         text name
-        text schema_name UK
+        text schema_key UK
     }
     USERS {
         uuid id PK
-        uuid tenant_id FK
-        citext email UK
+        uuid tenant_id FK "NULL for the platform admin"
+        text email UK
         text password_hash
-        text role
+        text role "platform_admin | admin | user"
     }
     API_TOKENS {
         uuid id PK
@@ -469,7 +472,7 @@ erDiagram
 
     AGENTS {
         uuid id PK
-        uuid owner_user_id
+        uuid owner_id "RLS: mine"
         text name
         text description
         jsonb config
@@ -507,20 +510,25 @@ erDiagram
     }
     CONNECTIONS {
         uuid id PK
+        uuid owner_id "RLS: mine"
         text server_name
         bytea encrypted_secret
-        bytea nonce
+        bytea secret_nonce
         bytea encrypted_data_key
+        bytea data_key_nonce
         int master_key_version
         text status
     }
     MCP_SERVERS {
         uuid id PK
-        text name UK
+        uuid owner_id "RLS: mine or company"
+        text name
         text transport
         text endpoint
         text auth_type
-        text status
+        text credential_env_var
+        text health
+        text visibility "private | company"
     }
     MCP_TOOLS {
         uuid id PK
