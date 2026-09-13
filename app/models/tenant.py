@@ -44,6 +44,33 @@ class Agent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class Run(Base):
+    """One execution of one agent, by one person. The playground's history and
+    the numbers the score is built from."""
+
+    __tablename__ = "runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), server_default=CURRENT_USER)
+    agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"))
+    #: LangGraph thread. The owner is part of the key, so nobody else can name it.
+    thread_id: Mapped[str] = mapped_column(String(120))
+    trigger: Mapped[str] = mapped_column(String(20), default="playground")  # playground | api
+    #: running | awaiting_approval | ok | rejected | error
+    status: Mapped[str] = mapped_column(String(20), default="running")
+    input: Mapped[str] = mapped_column(Text, default="")
+    #: the agent's final answer - a summary string, never a raw tool response
+    output: Mapped[str] = mapped_column(Text, default="")
+    #: what happened, one line per step, as shown in the chat
+    transcript: Mapped[list] = mapped_column(JSONB, default=list)
+    #: the approval the run is parked on, if any (redacted args only)
+    pending: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    feedback: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 1 | -1
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class McpServer(Base):
     """A tool server this workspace has registered.
 

@@ -120,3 +120,12 @@
 @media (max-width: 1100px) { .two { grid-template-columns: 1fr; } }
 
 .two pre { font-family: var(--mono); line-height: 1.5; }
+
+/* ------------------------------------------------------------- playground */
+
+.approval { border: 1px solid var(--warn); border-radius: 10px; overflow: hidden; max-width: 620px; }
+.approval .ah {
+  background: var(--warn-bg); color: var(--warn); padding: 8px 14px;
+  font-size: 11.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em;
+}
+.approval .ab { padding: 13px 14px; background: var(--surface); }

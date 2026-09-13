@@ -7,7 +7,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { get } from "../api";
+import { ago, get } from "../api";
 import { Badge, Card, Empty, Loading, TopBar } from "../ui";
 
 function AgentCard({ a }) {
@@ -25,8 +25,9 @@ function AgentCard({ a }) {
       <div className="foot">
         <div className="scores">
           <span className="score">{a.tool_count} tools</span>
+          <span className="score">{a.runs} run{a.runs === 1 ? "" : "s"}</span>
         </div>
-        <div>{a.guarded.length ? `${a.guarded.length} need approval` : "read-only"}</div>
+        <div>{a.last_run_at ? `last ${ago(a.last_run_at)}` : a.guarded.length ? `${a.guarded.length} need approval` : "read-only"}</div>
       </div>
     </Link>
   );

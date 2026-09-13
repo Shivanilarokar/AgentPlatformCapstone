@@ -1,8 +1,8 @@
 /* One agent, in full.
  *
- * Six tabs, matching the mockup. The two that are real today are Overview and
- * Connections; Playground, Runs, API and Settings say which step builds them
- * rather than showing numbers that are not true.
+ * Six tabs, matching the mockup. Overview, Playground, Connections and Runs are
+ * real; API and Settings say which step builds them rather than showing numbers
+ * that are not true.
  *
  * The graph on Overview is DRAWN FROM THE STORED CONFIGURATION. Edit the config
  * and the picture changes - it is not a hand-maintained diagram.
@@ -11,8 +11,9 @@
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 
-import { get } from "../api";
+import { ago, get } from "../api";
 import { Badge, Card, Check, Loading, Note, RiskBadge, SectionTitle, TopBar } from "../ui";
+import { PlaygroundTab, RunsTab } from "./Playground";
 
 const TABS = [
   ["overview", "Overview"],
@@ -148,7 +149,7 @@ function Overview({ a }) {
             <Check ok={cfg.requires_connections.length > 0}>
               Declares the connections it needs
             </Check>
-            <Check ok={false}>Not yet run in the playground</Check>
+            <Check ok={a.runs > 0}>{a.runs > 0 ? `Run ${a.runs} time${a.runs === 1 ? "" : "s"}` : "Not yet run in the playground"}</Check>
           </div>
         </Card>
 
@@ -159,6 +160,7 @@ function Overview({ a }) {
             <dt>Shape</dt><dd>{cfg.topology.type === "supervisor"
               ? `coordinator + ${cfg.topology.specialists.length} specialists` : "single agent"}</dd>
             <dt>Schedule</dt><dd>{cfg.schedule || "—"}</dd>
+            <dt>Runs</dt><dd>{a.runs}{a.last_run_at ? ` · last ${ago(a.last_run_at)}` : ""}</dd>
             <dt>Needs</dt><dd>{cfg.requires_connections.join(", ")}</dd>
             <dt>Visible to</dt><dd>you only</dd>
           </dl>
@@ -268,18 +270,8 @@ export default function AgentDetail() {
       <div className="content">
         {tab === "overview" && <Overview a={a} />}
         {tab === "connections" && <ConnectionsTab a={a} />}
-        {tab === "playground" && (
-          <NotYet step={8} what="A chat window where you test the agent, and where a risky tool pauses the run and shows Approve / Reject inline.">
-            <p className="muted" style={{ fontSize: 13, marginTop: 14 }}>
-              The approval gate itself already works — see{" "}
-              <span className="mono">app/runtime/guarded_tool.py</span>. What is missing is the
-              chat surface and streaming, not the control.
-            </p>
-          </NotYet>
-        )}
-        {tab === "runs" && (
-          <NotYet step={8} what="Run history with status, latency, cost and outcome. These numbers feed the score." />
-        )}
+        {tab === "playground" && <PlaygroundTab agent={a} />}
+        {tab === "runs" && <RunsTab agent={a} />}
         {tab === "api" && (
           <NotYet step={11} what="A callable URL for this agent, plus a Download Postman Collection button that produces a collection you can Send from immediately.">
             <Card style={{ marginTop: 14 }}>

@@ -14,6 +14,7 @@ from sqlalchemy import select, text
 from app.core.config import settings
 from app.core.db import engine, platform_session
 from app.core.security import hash_password
+from app.models import tenant as _tenant_models  # noqa: F401 - registers the tables on Base
 from app.models.base import Base
 from app.models.platform_ import PLATFORM_SCHEMA, PlatformBase, User
 from app.tenancy.schema_names import schema_for
@@ -28,6 +29,8 @@ _SYSTEM = "current_setting('app.role', true) = 'system'"
 _POLICIES = {
     # what I built is mine
     "agents": (f"owner_id = {_ME} OR {_SYSTEM}", f"owner_id = {_ME} OR {_SYSTEM}"),
+    # what I ran is mine
+    "runs": (f"owner_id = {_ME} OR {_SYSTEM}", f"owner_id = {_ME} OR {_SYSTEM}"),
     # my credentials are mine
     "connections": (f"owner_id = {_ME} OR {_SYSTEM}", f"owner_id = {_ME} OR {_SYSTEM}"),
     # a server I registered is mine, unless the company admin opened it to the company
