@@ -33,9 +33,6 @@ class Tenant(PlatformBase):
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(120))
     schema_key: Mapped[str] = mapped_column(String(50), unique=True)  # "northwind_labs" -> schema t_northwind_labs
-    #: What a colleague types at sign-up to join this company as a member.
-    #: Without it, anyone could join any company by guessing its name.
-    invite_code: Mapped[str] = mapped_column(String(16))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -44,16 +41,19 @@ class User(PlatformBase):
     __table_args__ = {"schema": PLATFORM_SCHEMA}
 
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey(f"{PLATFORM_SCHEMA}.tenants.id"))
+    #: NULL for the platform admin, who belongs to no company.
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(f"{PLATFORM_SCHEMA}.tenants.id"), nullable=True
+    )
     email: Mapped[str] = mapped_column(String(255), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     name: Mapped[str] = mapped_column(String(120))
-    role: Mapped[str] = mapped_column(String(20), default="member")  # admin (first user) | member
+    role: Mapped[str] = mapped_column(String(20), default="user")  # platform_admin | admin | user
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class SharedServer(PlatformBase):
-    """An MCP server shared with EVERY company. Only an admin can put one here.
+    """An MCP server shared with EVERY company. Only the platform admin puts one here.
 
     Same shape as the per-tenant McpServer; the difference is purely where it
     lives. A tenant's registry is the union of its own servers and these.

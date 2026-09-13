@@ -26,7 +26,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.platform_ import SharedServer, SharedTool
@@ -50,7 +50,7 @@ class ServerView:
     auth_type: str
     description: str
     health: str  # ok | down
-    visibility: str  # private | shared
+    visibility: str  # private (mine) | company | everyone
     shared_by: str
     last_checked_at: datetime | None
     tools: list  # McpTool | SharedTool
@@ -59,28 +59,38 @@ class ServerView:
 # --------------------------------------------------------------------- read
 
 
-async def list_servers(session: AsyncSession) -> list[ServerView]:
-    """This company's servers, plus everything shared. Private wins on a clash.
-
-    No tenant filter on the private query: the gate already pointed us at one
-    company's schema. The shared query names platform explicitly, which is the
-    one schema that is allowed.
-    """
-    private = list(await session.scalars(select(McpServer).order_by(McpServer.name)))
+async def list_shared(session: AsyncSession) -> list[ServerView]:
+    """What the platform admin shared with every company. Works from any session:
+    platform is always on the search_path."""
     shared = list(await session.scalars(select(SharedServer).order_by(SharedServer.name)))
     shared_tools = list(await session.scalars(select(SharedTool)))
-
-    views: dict[str, ServerView] = {}
-    for s in shared:
-        views[s.name] = ServerView(
+    return [
+        ServerView(
             s.name, s.transport, s.endpoint, s.auth_type, s.description, s.health,
-            "shared", s.shared_by, s.last_checked_at,
+            "everyone", s.shared_by, s.last_checked_at,
             [t for t in shared_tools if t.server_id == s.id],
         )
-    for s in private:
+        for s in shared
+    ]
+
+
+async def list_servers(session: AsyncSession) -> list[ServerView]:
+    """What THIS person can use: shared with everyone, shared in the company,
+    and their own. Nearer wins on a name clash (mine > company > everyone).
+
+    No tenant filter and no owner filter on the private query: the gate pointed
+    us at one company's schema, and row-level security hides every row that is
+    neither mine nor marked "company".
+    """
+    mine_or_company = list(await session.scalars(select(McpServer).order_by(McpServer.name)))
+    me = await session.scalar(text("SELECT NULLIF(current_setting('app.user_id', true), '')::uuid"))
+
+    views: dict[str, ServerView] = {v.name: v for v in await list_shared(session)}
+    for s in sorted(mine_or_company, key=lambda s: s.visibility == "company"):  # company first, mine overrides
         views[s.name] = ServerView(
             s.name, s.transport, s.endpoint, s.auth_type, s.description, s.health,
-            "private", "", s.last_checked_at, list(s.tools),
+            "private" if s.owner_id == me and s.visibility == "private" else "company",
+            "", s.last_checked_at, list(s.tools),
         )
     return sorted(views.values(), key=lambda v: v.name)
 
@@ -135,14 +145,18 @@ async def register(
 ) -> ServerView:
     """Connect, ask what tools it has, store the answer. In that order.
 
-    `visibility="shared"` writes to platform.mcp_servers instead of this company's
-    schema. The router only allows that for admins.
+        private   mine - the row's owner is whoever the gate signed in
+        company   mine, but visible to everyone in my company (admins only)
+        everyone  platform.mcp_servers - the platform admin only
+
+    The router enforces who may pick which; row-level security enforces that
+    the row is written as the signed-in person's.
     """
     ep = Endpoint.parse(transport, endpoint, credential_env_var, auth_type)
     discovered = await discover(ep, token)
     now = datetime.now(timezone.utc)
 
-    if visibility == "shared":
+    if visibility == "everyone":
         server = await session.scalar(select(SharedServer).where(SharedServer.name == name))
         if server is None:
             server = SharedServer(name=name)
@@ -150,11 +164,16 @@ async def register(
         server.shared_by = shared_by
         tool_cls, fk = SharedTool, SharedTool.server_id
     else:
-        server = await session.scalar(select(McpServer).where(McpServer.name == name))
+        # RLS: this can only find MY row of that name (a colleague's private
+        # row is invisible), so two people may each register "github".
+        me = await session.scalar(text("SELECT NULLIF(current_setting('app.user_id', true), '')::uuid"))
+        server = await session.scalar(
+            select(McpServer).where(McpServer.name == name, McpServer.owner_id == me)
+        )
         if server is None:
             server = McpServer(name=name)
             session.add(server)
-        server.visibility = "private"
+        server.visibility = visibility
         tool_cls, fk = McpTool, McpTool.server_id
 
     server.transport = ep.transport
@@ -177,7 +196,8 @@ async def register(
 
 
 async def refresh(
-    session: AsyncSession, name: str, token: str | None = None, *, shared: bool = False
+    session: AsyncSession, name: str, token: str | None = None, *, shared: bool = False,
+    server_id=None,
 ) -> str:
     """Re-ask a known server what it has; mark it down if it has gone away.
 
@@ -190,7 +210,10 @@ async def refresh(
     server = None
     tool_cls, fk = McpTool, McpTool.server_id
     if not shared:
-        server = await session.scalar(select(McpServer).where(McpServer.name == name))
+        q = select(McpServer).where(McpServer.name == name)
+        if server_id is not None:  # the sweep names the exact row; a person sees only theirs anyway
+            q = q.where(McpServer.id == server_id)
+        server = await session.scalar(q)
     if server is None:
         server = await session.scalar(select(SharedServer).where(SharedServer.name == name))
         tool_cls, fk = SharedTool, SharedTool.server_id

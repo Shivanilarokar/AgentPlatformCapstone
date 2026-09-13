@@ -1,10 +1,15 @@
 """MCP Registry endpoints.
 
-    GET  /v1/servers               this company's registry: private + shared
-    GET  /v1/servers/catalogue     quick-picks the platform can launch itself
+    GET  /v1/servers               what I can use: mine + my company's + everyone's
+    GET  /v1/servers/catalogue     quick-picks: the vendors' own servers
     POST /v1/servers               register: name, transport, endpoint, auth type
     POST /v1/servers/{name}/refresh
-    POST /v1/servers/health-sweep  run the scheduled check now (admin)
+    POST /v1/servers/health-sweep  run the scheduled check now (platform admin)
+
+Who may register with which visibility:
+    private   anyone with a workspace       -> t_<company>.mcp_servers, owner = me
+    company   the company's admin           -> same table, marked company
+    everyone  the platform admin only       -> platform.mcp_servers
 
 The rule this screen exists to enforce: the platform connects to a server and
 asks it what tools it has. A tool name is never typed in by a human, and a
@@ -15,9 +20,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import NOT_FOUND, current_user, require_admin, tenant_db
+from app.api.deps import NOT_FOUND, current_user, require_platform_admin
+from app.core.db import platform_session, tenant_session
 from app.core.security import Claims
 from app.mcp_registry import health, registry
 from app.mcp_registry.catalogue import CATALOGUE
@@ -40,7 +45,7 @@ class ServerOut(BaseModel):
     auth_type: str
     description: str
     health: str  # ok | down
-    visibility: str  # private | shared
+    visibility: str  # private | company | everyone
     shared_by: str
     connected: bool
     last_checked_at: str | None
@@ -71,12 +76,20 @@ class RegisterIn(BaseModel):
     #: stdio + api_key: which env var the subprocess reads its credential from
     credential_env_var: str | None = Field(default=None, max_length=80)
     description: str = Field(default="", max_length=500)
-    #: "private" = just my workspace. "shared" = everyone; admins only.
-    visibility: str = Field(default="private", pattern=r"^(private|shared)$")
+    #: "private" = just me. "company" = my company (admin). "everyone" = platform admin.
+    visibility: str = Field(default="private", pattern=r"^(private|company|everyone)$")
     #: The remote servers (GitHub, Slack, Atlassian) refuse to list their tools
     #: without one. When given, it is used for discovery and then saved -
-    #: encrypted - as this workspace's connection, so "Connect & save" means both.
+    #: encrypted - as MY connection, so "Connect & save" means both.
     token: str | None = None
+
+
+def _session(claims: Claims):
+    """The platform admin has no company, so only the shared schema exists for
+    them. Everyone else gets their company's schema and their own rows."""
+    if claims.is_platform_admin:
+        return platform_session()
+    return tenant_session(claims.tenant_key, claims.user_id)
 
 
 def _out(v: registry.ServerView, connected: set[str]) -> ServerOut:
@@ -101,9 +114,12 @@ def _out(v: registry.ServerView, connected: set[str]) -> ServerOut:
 
 
 @router.get("", response_model=list[ServerOut])
-async def list_servers(db: AsyncSession = Depends(tenant_db)):
-    connected = await registry.connected_servers(db)
-    return [_out(v, connected) for v in await registry.list_servers(db)]
+async def list_servers(claims: Claims = Depends(current_user)):
+    async with _session(claims) as db:
+        if claims.is_platform_admin:
+            return [_out(v, set()) for v in await registry.list_shared(db)]
+        connected = await registry.connected_servers(db)
+        return [_out(v, connected) for v in await registry.list_servers(db)]
 
 
 @router.get("/catalogue", response_model=list[CatalogueOut])
@@ -120,67 +136,82 @@ async def catalogue():
 
 
 @router.post("", response_model=ServerOut, status_code=201)
-async def register_server(
-    body: RegisterIn,
-    claims: Claims = Depends(current_user),
-    db: AsyncSession = Depends(tenant_db),
-):
-    if body.visibility == "shared" and not claims.is_admin:
-        raise HTTPException(403, detail={"error": "admin_only",
-                                         "detail": "Only an admin can share a server with everyone."})
-    try:
-        view = await registry.register(
-            db,
-            name=body.name,
-            transport=body.transport,
-            endpoint=body.endpoint,
-            auth_type=body.auth_type,
-            credential_env_var=body.credential_env_var,
-            description=body.description,
-            visibility=body.visibility,
-            shared_by=claims.tenant_key if body.visibility == "shared" else "",
-            token=body.token,
-        )
-    except ValueError as exc:  # a malformed endpoint
-        raise HTTPException(422, detail={"error": "bad_endpoint", "detail": str(exc)}) from None
-    except AuthRequired as exc:
-        # Alive, but it will not list its tools anonymously. The form shows a
-        # credential field and the user tries again with one.
-        raise HTTPException(401, detail={"error": "auth_required", "detail": str(exc)}) from None
-    except registry.ServerUnreachable as exc:
-        # Nothing was saved. A registry entry with an unverified tool list would
-        # be worse than no entry at all.
-        raise HTTPException(422, detail={"error": "unreachable", "detail": str(exc)}) from None
+async def register_server(body: RegisterIn, claims: Claims = Depends(current_user)):
+    allowed = {
+        "everyone": claims.is_platform_admin,
+        "company": claims.is_company_admin,
+        "private": not claims.is_platform_admin,
+    }[body.visibility]
+    if not allowed:
+        raise HTTPException(403, detail={"error": "not_allowed", "detail": {
+            "everyone": "Only the platform admin can share a server with every company.",
+            "company": "Only your company's admin can share a server with the whole company.",
+            "private": "The platform admin has no workspace of their own.",
+        }[body.visibility]})
 
-    if body.token:
-        # Discovery worked with it, so it is this workspace's connection now.
-        # Encrypted on the way in; the plaintext leaves visibility with this request.
-        await vault.add(db, tenant=claims.tenant_key, server_name=body.name,
-                        secret=body.token, added_by=claims.email)
+    async with _session(claims) as db:
+        try:
+            view = await registry.register(
+                db,
+                name=body.name,
+                transport=body.transport,
+                endpoint=body.endpoint,
+                auth_type=body.auth_type,
+                credential_env_var=body.credential_env_var,
+                description=body.description,
+                visibility=body.visibility,
+                shared_by="platform" if body.visibility == "everyone" else "",
+                token=body.token,
+            )
+        except ValueError as exc:  # a malformed endpoint
+            raise HTTPException(422, detail={"error": "bad_endpoint", "detail": str(exc)}) from None
+        except AuthRequired as exc:
+            # Alive, but it will not list its tools anonymously. The form shows a
+            # credential field and the user tries again with one.
+            raise HTTPException(401, detail={"error": "auth_required", "detail": str(exc)}) from None
+        except registry.ServerUnreachable as exc:
+            # Nothing was saved. A registry entry with an unverified tool list would
+            # be worse than no entry at all.
+            raise HTTPException(422, detail={"error": "unreachable", "detail": str(exc)}) from None
 
-    return _out(view, await registry.connected_servers(db))
+        if body.token and not claims.is_platform_admin:
+            # Discovery worked with it, so it is MY connection now. Encrypted on
+            # the way in; the plaintext leaves scope with this request.
+            await vault.add(db, tenant=claims.tenant_key, user_id=claims.user_id,
+                            server_name=body.name, secret=body.token, added_by=claims.email)
+
+        connected = set() if claims.is_platform_admin else await registry.connected_servers(db)
+        return _out(view, connected)
 
 
 @router.post("/{name}/refresh", response_model=ServerOut)
-async def refresh_server(
-    name: str, claims: Claims = Depends(current_user), db: AsyncSession = Depends(tenant_db)
-):
-    """Re-check now, with this workspace's own credential if it has one."""
-    token = await vault.use(db, tenant=claims.tenant_key, server_name=name)
-    try:
-        await registry.refresh(db, name, token=token)
-    except KeyError:
-        raise HTTPException(404, detail=NOT_FOUND) from None
-    await db.flush()
-    connected = await registry.connected_servers(db)
-    view = next((v for v in await registry.list_servers(db) if v.name == name), None)
-    if view is None:
-        raise HTTPException(404, detail=NOT_FOUND)
-    return _out(view, connected)
+async def refresh_server(name: str, claims: Claims = Depends(current_user)):
+    """Re-check now, with my own credential if I have one."""
+    async with _session(claims) as db:
+        if claims.is_platform_admin:
+            token, shared = None, True
+        else:
+            token = await vault.use(db, tenant=claims.tenant_key, user_id=claims.user_id,
+                                    server_name=name)
+            shared = False
+        try:
+            await registry.refresh(db, name, token=token, shared=shared)
+        except KeyError:
+            raise HTTPException(404, detail=NOT_FOUND) from None
+        finally:
+            del token
+        await db.flush()
+        views = await (registry.list_shared(db) if claims.is_platform_admin
+                       else registry.list_servers(db))
+        view = next((v for v in views if v.name == name), None)
+        if view is None:
+            raise HTTPException(404, detail=NOT_FOUND)
+        connected = set() if claims.is_platform_admin else await registry.connected_servers(db)
+        return _out(view, connected)
 
 
 @router.post("/health-sweep")
-async def run_health_sweep(_: Claims = Depends(require_admin)):
+async def run_health_sweep(_: Claims = Depends(require_platform_admin)):
     """Run the scheduled check right now, so it can be demonstrated on demand.
 
     The same function the background task calls every five minutes.

@@ -79,17 +79,18 @@ def _master_key() -> bytes:
     return key
 
 
-def _aad(tenant: str, server_name: str) -> bytes:
-    """Binds a encrypted_secret to the company and server it belongs to."""
-    return f"{tenant}:{server_name}".encode()
+def _aad(tenant: str, user_id: str, server_name: str) -> bytes:
+    """Bound into the GCM tag: a row copied to another company, another PERSON,
+    or relabelled as another server simply fails to decrypt."""
+    return f"{tenant}:{user_id}:{server_name}".encode()
 
 
-def seal(secret: str, *, tenant: str, server_name: str) -> SealedSecret:
+def seal(secret: str, *, tenant: str, user_id: str, server_name: str) -> SealedSecret:
     """Encrypt on the way in. The plaintext does not survive this function."""
     if not secret:
         raise VaultError("refusing to store an empty secret")
 
-    aad = _aad(tenant, server_name)
+    aad = _aad(tenant, user_id, server_name)
 
     dek = AESGCM.generate_key(bit_length=256)
     secret_nonce = os.urandom(NONCE_BYTES)
@@ -102,12 +103,12 @@ def seal(secret: str, *, tenant: str, server_name: str) -> SealedSecret:
     return SealedSecret(encrypted_secret, secret_nonce, encrypted_data_key, data_key_nonce, master_key_version=1)
 
 
-def open_(sealed: SealedSecret, *, tenant: str, server_name: str) -> str:
+def open_(sealed: SealedSecret, *, tenant: str, user_id: str, server_name: str) -> str:
     """Decrypt for ONE use. The caller must drop the result immediately.
 
     Never call this to display a secret. There is no endpoint that returns one.
     """
-    aad = _aad(tenant, server_name)
+    aad = _aad(tenant, user_id, server_name)
     try:
         dek = AESGCM(_master_key()).decrypt(sealed.data_key_nonce, sealed.encrypted_data_key, aad)
         plaintext = AESGCM(dek).decrypt(sealed.secret_nonce, sealed.encrypted_secret, aad)

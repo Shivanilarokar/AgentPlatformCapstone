@@ -61,6 +61,7 @@ async def add_connection(
     conn = await connections.add(
         db,
         tenant=claims.tenant_key,
+        user_id=claims.user_id,
         server_name=body.server_name,
         secret=body.secret,
         added_by=claims.email,

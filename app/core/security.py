@@ -1,10 +1,16 @@
 """Passwords and tokens.
 
-Signing in decides two things that travel with you for the rest of the session:
-which company you belong to, and whether you are an admin. Everything else in
-the platform follows from those two, so they live in the JWT and the tenant gate
-reads them straight out of it - no database round trip before we can even pick a
-schema.
+Signing in decides three things that travel with you for the rest of the
+session: which company you belong to, which person you are, and your role.
+Everything else in the platform follows from those, so they live in the JWT and
+the gate reads them straight out of it - no database round trip before we can
+even pick a schema.
+
+    platform_admin  exactly one, seeded from .env, belongs to no company.
+                    Shares servers with everyone and reviews the marketplace.
+    admin           created their company. Can also share a server with the
+                    whole company.
+    user            everyone else. Everything they make is theirs alone.
 """
 
 from __future__ import annotations
@@ -40,17 +46,18 @@ class Claims:
     """Who is asking. This is what the tenant gate turns into a search_path."""
 
     user_id: str
-    tenant_id: str
-    tenant_key: str
+    tenant_id: str | None  # None for the platform admin
+    tenant_key: str | None
     email: str
     name: str
-    role: str
+    role: str  # platform_admin | admin | user
 
     @property
-    def is_admin(self) -> bool:
-        """Runs the company: the first person to sign up for it. Admins can share
-        a server with every company, invite members, and review the marketplace.
-        Members can do everything else inside their own workspace."""
+    def is_platform_admin(self) -> bool:
+        return self.role == "platform_admin"
+
+    @property
+    def is_company_admin(self) -> bool:
         return self.role == "admin"
 
 

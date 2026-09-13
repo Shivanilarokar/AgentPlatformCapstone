@@ -41,7 +41,7 @@ function sample(tools) {
 
 /* --------------------------------------------------------------- one card */
 
-function ServerCard({ server, onRefresh }) {
+function ServerCard({ server, onRefresh, platformAdmin }) {
   const [checking, setChecking] = useState(false);
   const [all, setAll] = useState(false);
 
@@ -63,9 +63,10 @@ function ServerCard({ server, onRefresh }) {
         <div className="row" style={{ gap: 8 }}>
           <b style={{ fontSize: 14.5 }} title={server.endpoint}>{server.name}</b>
           <Badge tone={server.health === "ok" ? "ok" : "danger"} dot>{server.health}</Badge>
-          {server.visibility === "private" && <Badge>private</Badge>}
+          {server.visibility === "private" && <Badge>just me</Badge>}
+          {server.visibility === "company" && <Badge>company</Badge>}
         </div>
-        {server.connected
+        {platformAdmin ? null : server.connected
           ? <Badge tone="ok">connected</Badge>
           : <Link className="btn primary sm" to={`/connections?add=${server.name}`}>Connect</Link>}
       </div>
@@ -116,7 +117,8 @@ const STEPS = [
   "Store the list; mark the server healthy",
 ];
 
-function RegisterForm({ catalogue, isAdmin, onRegistered }) {
+function RegisterForm({ catalogue, role, onRegistered }) {
+  const platformAdmin = role === "platform_admin";
   const [f, setF] = useState(EMPTY);
   const [error, setError] = useState(null);
   const [needsToken, setNeedsToken] = useState(false);
@@ -134,7 +136,7 @@ function RegisterForm({ catalogue, isAdmin, onRegistered }) {
     setHint(c.credential_hint || "");
     setNeedsToken(c.transport !== "stdio" && c.auth_type !== "none");
     setError(null); setPhase("idle");
-  }, []);
+  }, [platformAdmin]);
 
   async function save() {
     setError(null); setPhase("connecting");
@@ -161,7 +163,8 @@ function RegisterForm({ catalogue, isAdmin, onRegistered }) {
   }
 
   function cancel() {
-    setF(EMPTY); setError(null); setPhase("idle"); setNeedsToken(false); setHint("");
+    setF({ ...EMPTY, visibility: platformAdmin ? "everyone" : "private" });
+    setError(null); setPhase("idle"); setNeedsToken(false); setHint("");
   }
 
   const placeholder = {
@@ -229,8 +232,16 @@ function RegisterForm({ catalogue, isAdmin, onRegistered }) {
             )}
             <Field label="Visible to">
               <select value={f.visibility} onChange={set("visibility")} style={{ marginBottom: 2 }}>
-                <option value="private">Just my workspace</option>
-                <option value="shared" disabled={!isAdmin}>Everyone (admin only)</option>
+                {platformAdmin ? (
+                  <option value="everyone">Everyone (all companies)</option>
+                ) : (
+                  <>
+                    <option value="private">Just me</option>
+                    <option value="company" disabled={role !== "admin"}>
+                      My company{role === "admin" ? "" : " (company admin only)"}
+                    </option>
+                  </>
+                )}
               </select>
             </Field>
 
@@ -302,8 +313,10 @@ export default function Registry() {
   if (error) return <div className="content"><div className="note warn">{error}</div></div>;
   if (!servers) return <Loading what="the registry" />;
 
-  const shared = servers.filter((s) => s.visibility === "shared");
-  const priv = servers.filter((s) => s.visibility === "private");
+  const platformAdmin = me?.role === "platform_admin";
+  const everyone = servers.filter((s) => s.visibility === "everyone");
+  const company = servers.filter((s) => s.visibility === "company");
+  const mine = servers.filter((s) => s.visibility === "private");
 
   return (
     <>
@@ -315,34 +328,42 @@ export default function Registry() {
       <div className="content">
         {servers.length === 0 && (
           <Empty title="No servers yet">
-            Register one below — paste an address, or pick GitHub, Slack, Jira, filesystem, git or
-            sqlite and the platform will connect to it.
+            {platformAdmin
+              ? "Register one below and every company will see it."
+              : "Register one below — paste an address, or pick GitHub, Slack, Jira, filesystem, git or sqlite and the platform will connect to it."}
           </Empty>
         )}
 
-        {shared.length > 0 && (
+        {everyone.length > 0 && (
           <>
-            <SectionTitle style={{ marginTop: 0 }}>Shared servers</SectionTitle>
+            <SectionTitle style={{ marginTop: 0 }}>Shared with everyone</SectionTitle>
             <div className="grid">
-              {shared.map((s) => (
-                <ServerCard key={s.name} server={s} onRefresh={load} />
+              {everyone.map((s) => (
+                <ServerCard key={s.name} server={s} onRefresh={load} platformAdmin={platformAdmin} />
               ))}
             </div>
           </>
         )}
 
-        {priv.length > 0 && (
+        {company.length > 0 && (
           <>
-            <SectionTitle>Private to {me?.company ?? "this workspace"}</SectionTitle>
+            <SectionTitle>Shared in {me?.company ?? "this company"}</SectionTitle>
             <div className="grid">
-              {priv.map((s) => (
-                <ServerCard key={s.name} server={s} onRefresh={load} />
-              ))}
+              {company.map((s) => <ServerCard key={s.name} server={s} onRefresh={load} />)}
             </div>
           </>
         )}
 
-        <RegisterForm catalogue={catalogue} isAdmin={me?.role === "admin"} onRegistered={load} />
+        {mine.length > 0 && (
+          <>
+            <SectionTitle>Private to you</SectionTitle>
+            <div className="grid">
+              {mine.map((s) => <ServerCard key={s.name} server={s} onRefresh={load} />)}
+            </div>
+          </>
+        )}
+
+        <RegisterForm catalogue={catalogue} role={me?.role} onRegistered={load} />
       </div>
     </>
   );

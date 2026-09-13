@@ -2,15 +2,18 @@
 
 "Email and password is enough. What matters is what it keeps separate."
 
-Signing up creates a COMPANY as well as a user: a row in platform.tenants, a
-brand new Postgres schema, and that company's tables inside it. From then on,
-every request this user makes is confined to that schema.
+Signing up with a company name nobody has used creates that COMPANY as well as
+the user: a row in platform.tenants, a brand new Postgres schema, and that
+company's tables inside it - and the person becomes its admin. Signing up with
+a company name that exists joins it as a user. Either way, from then on every
+request this person makes is confined to that schema, and to their own rows.
+
+The platform admin is never created here. See ensure_platform_admin().
 """
 
 from __future__ import annotations
 
 import re
-import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
@@ -38,8 +41,6 @@ class SignUp(BaseModel):
     password: str = Field(min_length=8)
     name: str = Field(min_length=1, max_length=120)
     company: str = Field(min_length=1, max_length=120)
-    #: Joining an existing company needs the code its admin hands out.
-    invite_code: str | None = Field(default=None, max_length=16)
 
 
 class SignIn(BaseModel):
@@ -50,10 +51,8 @@ class SignIn(BaseModel):
 class Me(BaseModel):
     email: str
     name: str
-    company: str
-    role: str
-    #: Only an admin sees this - it is what they give a colleague to join.
-    invite_code: str | None = None
+    company: str | None  # None for the platform admin
+    role: str  # platform_admin | admin | user
 
 
 def schema_key_for(company: str) -> str:
@@ -76,7 +75,7 @@ async def register(body: SignUp, response: Response, db: AsyncSession = Depends(
     """Two outcomes, decided by the company name:
 
     * a NEW company  -> it is created, gets its own schema, and you are its admin
-    * an EXISTING one -> you need its invite code, and you join as a member
+    * an EXISTING one -> you join it as a user
     """
     taken = await db.scalar(select(User).where(func.lower(User.email) == body.email.lower()))
     if taken:
@@ -85,26 +84,17 @@ async def register(body: SignUp, response: Response, db: AsyncSession = Depends(
     key = schema_key_for(body.company)
     tenant = await db.scalar(select(Tenant).where(Tenant.schema_key == key))
     created = tenant is None
-
     if created:
-        tenant = Tenant(name=body.company, schema_key=key, invite_code=secrets.token_hex(4))
+        tenant = Tenant(name=body.company, schema_key=key)
         db.add(tenant)
         await db.flush()
-        role = "admin"
-    else:
-        if not body.invite_code or not secrets.compare_digest(
-            body.invite_code.strip().lower(), tenant.invite_code
-        ):
-            raise HTTPException(403, detail={"error": "bad_invite_code",
-                                             "detail": "That company exists. Ask its admin for the invite code."})
-        role = "member"
 
     user = User(
         tenant_id=tenant.id,
         email=body.email.lower(),
         password_hash=hash_password(body.password),
         name=body.name,
-        role=role,
+        role="admin" if created else "user",
     )
     db.add(user)
     await db.flush()
@@ -128,11 +118,16 @@ async def login(body: SignIn, response: Response, db: AsyncSession = Depends(pla
         # One message for both cases: never reveal which addresses exist.
         raise HTTPException(401, detail={"error": "bad_credentials"})
 
-    tenant = await db.get(Tenant, user.tenant_id)
-    claims = Claims(str(user.id), str(tenant.id), tenant.schema_key, user.email, user.name, user.role)
+    tenant = await db.get(Tenant, user.tenant_id) if user.tenant_id else None
+    claims = Claims(
+        str(user.id),
+        str(tenant.id) if tenant else None,
+        tenant.schema_key if tenant else None,
+        user.email, user.name, user.role,
+    )
     token = issue_token(claims)
     _set_cookie(response, token)
-    return {"token": token, "company": tenant.name, "role": user.role}
+    return {"token": token, "company": tenant.name if tenant else None, "role": user.role}
 
 
 @router.post("/logout")
@@ -143,6 +138,6 @@ async def logout(response: Response):
 
 @router.get("/me", response_model=Me)
 async def me(claims: Claims = Depends(current_user), db: AsyncSession = Depends(platform_db)):
-    tenant = await db.get(Tenant, claims.tenant_id)
-    return Me(email=claims.email, name=claims.name, company=tenant.name, role=claims.role,
-              invite_code=tenant.invite_code if claims.is_admin else None)
+    tenant = await db.get(Tenant, claims.tenant_id) if claims.tenant_id else None
+    return Me(email=claims.email, name=claims.name,
+              company=tenant.name if tenant else None, role=claims.role)

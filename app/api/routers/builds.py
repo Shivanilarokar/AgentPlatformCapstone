@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
-from app.api.deps import NOT_FOUND, current_user
+from app.api.deps import NOT_FOUND, workspace_user as current_user
 from app.builder.graph import build_graph
 from app.core.security import Claims
 from app.tenancy.checkpointers import checkpointer_for
@@ -80,7 +80,7 @@ async def start_build(body: StartIn, claims: Claims = Depends(current_user)):
     thread_id = f"build-{uuid.uuid4().hex[:12]}"
     graph = await _graph(claims)
     result = await graph.ainvoke(
-        {"prompt": body.prompt, "tenant": claims.tenant_key, "log": []},
+        {"prompt": body.prompt, "tenant": claims.tenant_key, "user": claims.user_id, "log": []},
         config={"configurable": {"thread_id": thread_id}},
     )
     return _shape(thread_id, result)
@@ -113,7 +113,7 @@ async def build_from_form(body: FormIn, claims: Claims = Depends(current_user)):
     cfg = {"configurable": {"thread_id": thread_id}}
 
     result = await graph.ainvoke(
-        {"prompt": body.prompt, "tenant": claims.tenant_key, "log": []}, config=cfg
+        {"prompt": body.prompt, "tenant": claims.tenant_key, "user": claims.user_id, "log": []}, config=cfg
     )
 
     # Answer whatever the graph stops on, up to a small bound so a loop cannot
@@ -141,14 +141,15 @@ async def resume_build(
     thread_id: str, body: ResumeIn, claims: Claims = Depends(current_user)
 ):
     graph = await _graph(claims)
+    cfg = {"configurable": {"thread_id": thread_id}}
+    snapshot = await graph.aget_state(cfg)
+    if snapshot is None or not snapshot.created_at or snapshot.values.get("user") != claims.user_id:
+        raise HTTPException(404, detail=NOT_FOUND)  # a colleague's build is not mine to answer
 
     # The interrupt decides what a resume value looks like.
     payload: Any = body.selected if body.selected is not None else {"action": body.action}
 
-    result = await graph.ainvoke(
-        Command(resume=payload),
-        config={"configurable": {"thread_id": thread_id}},
-    )
+    result = await graph.ainvoke(Command(resume=payload), config=cfg)
     return _shape(thread_id, result)
 
 
@@ -161,8 +162,8 @@ async def get_build(thread_id: str, claims: Claims = Depends(current_user)):
     """
     graph = await _graph(claims)
     snapshot = await graph.aget_state({"configurable": {"thread_id": thread_id}})
-    if snapshot is None or not snapshot.created_at:
-        raise HTTPException(404, detail=NOT_FOUND)
+    if snapshot is None or not snapshot.created_at or snapshot.values.get("user") != claims.user_id:
+        raise HTTPException(404, detail=NOT_FOUND)  # not mine == does not exist
 
     pending = snapshot.tasks and snapshot.tasks[0].interrupts
     if pending:

@@ -19,12 +19,14 @@ from app.mcp_registry.mcp_client import Endpoint
 from app.vault import connections
 
 
-def vault_resolver(tenant_key: str) -> Callable[[str], Awaitable[str | None]]:
-    """Build the `resolve_token` a RunContext needs, for one company."""
+def vault_resolver(tenant_key: str, user_id: str) -> Callable[[str], Awaitable[str | None]]:
+    """Build the `resolve_token` a RunContext needs, for one person in one company."""
 
     async def resolve(server_name: str) -> str | None:
-        async with tenant_session(tenant_key) as session:
-            return await connections.use(session, tenant=tenant_key, server_name=server_name)
+        async with tenant_session(tenant_key, user_id) as session:
+            return await connections.use(
+                session, tenant=tenant_key, user_id=user_id, server_name=server_name
+            )
 
     return resolve
 
@@ -38,11 +40,11 @@ def static_resolver(tokens: dict[str, str]) -> Callable[[str], Awaitable[str | N
     return resolve
 
 
-def registry_endpoints(tenant_key: str) -> Callable[[str], Awaitable[Endpoint | None]]:
-    """Server name -> Endpoint, from this company's registry (private first, then shared)."""
+def registry_endpoints(tenant_key: str, user_id: str) -> Callable[[str], Awaitable[Endpoint | None]]:
+    """Server name -> Endpoint, from what this person can see (mine > company > everyone)."""
 
     async def resolve(server_name: str) -> Endpoint | None:
-        async with tenant_session(tenant_key) as session:
+        async with tenant_session(tenant_key, user_id) as session:
             return await registry.endpoint_for(session, server_name)
 
     return resolve

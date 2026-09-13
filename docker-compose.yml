@@ -9,6 +9,8 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Creates the non-superuser role the app connects as. See the file.
+      - ./docker/db/init.sql:/docker-entrypoint-initdb.d/10-app-role.sql:ro
     healthcheck:
       # Plain depends_on only waits for the CONTAINER to start, not for Postgres
       # to accept connections. Without this the API crashes on boot ~half the time.
@@ -26,7 +28,7 @@ services:
         required: false
     environment:
       # "db" is the service name above - Docker's DNS resolves it to that container.
-      DATABASE_URL: postgresql+psycopg://forge:forge@db:5432/forge
+      DATABASE_URL: postgresql+psycopg://forge_app:forge_app@db:5432/forge
     ports:
       - "8000:8000"
     volumes:

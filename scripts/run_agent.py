@@ -4,7 +4,7 @@
     uv run python scripts/run_agent.py --reject         # refuse it
     uv run python scripts/run_agent.py --no-connection  # prove it degrades
     uv run python scripts/run_agent.py --ask            # you type the decision
-    uv run python scripts/run_agent.py --tenant=northwind_labs   # endpoints + token from the workspace
+    uv run python scripts/run_agent.py --as=shivani@northwind.example   # that person's registry + credentials
 
 What this proves, all of it real:
 
@@ -50,7 +50,20 @@ async def main() -> int:
     reject = "--reject" in sys.argv
     no_conn = "--no-connection" in sys.argv
     ask = "--ask" in sys.argv
-    tenant = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--tenant=")), None)
+    email = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--as=")), None)
+    tenant = user_id = None
+    if email:
+        from sqlalchemy import func, select
+
+        from app.core.db import platform_session
+        from app.models.platform_ import Tenant, User
+
+        async with platform_session() as s:
+            user = await s.scalar(select(User).where(func.lower(User.email) == email.lower()))
+            if user is None or user.tenant_id is None:
+                print(f"no workspace user {email!r}"); return 1
+            tenant = (await s.get(Tenant, user.tenant_id)).schema_key
+            user_id = str(user.id)
 
     cfg = AgentConfig.model_validate_json(CONFIG.read_text(encoding="utf-8"))
 
@@ -70,7 +83,7 @@ async def main() -> int:
     if no_conn:
         resolve = static_resolver({})  # models a revoked connection
     elif tenant:
-        resolve = vault_resolver(tenant)
+        resolve = vault_resolver(tenant, user_id)
     else:
         resolve = static_resolver({"filesystem": "demo-token"})
 
@@ -78,7 +91,7 @@ async def main() -> int:
         tenant_id=tenant or "local",
         thread_id="run-1",
         resolve_token=resolve,
-        resolve_endpoint=registry_endpoints(tenant) if tenant else local_endpoints,
+        resolve_endpoint=registry_endpoints(tenant, user_id) if tenant else local_endpoints,
     )
 
     rule(f"COMPILING  {cfg.name}   fingerprint {cfg.fingerprint()}")
@@ -86,7 +99,7 @@ async def main() -> int:
     print(f"  shape       {cfg.topology.type} -> {cfg.topology.supervisor.delegates_to}")
     print(f"  tools       {', '.join(t.ref for t in cfg.tools)}")
     print(f"  guarded     {', '.join(t.ref for t in cfg.guarded_tools) or 'none'}")
-    print(f"  workspace   {'registry of ' + tenant if tenant else scratch}")
+    print(f"  workspace   {email + ' in ' + tenant if tenant else scratch}")
     print("\n  (asking the MCP server for its real tool schemas...)")
 
     graph = await compile_agent(cfg, ctx, checkpointer=InMemorySaver())

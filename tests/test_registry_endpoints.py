@@ -25,6 +25,10 @@ from app.mcp_registry.mcp_client import Endpoint
 from app.tenancy.provision import create_tenant, drop_tenant, bootstrap_platform
 
 A, B = "regtest_a", "regtest_b"
+#: People: two at company A, one at B.
+ANNE = "00000000-0000-0000-0000-0000000000a1"
+ARUN = "00000000-0000-0000-0000-0000000000a2"
+BEN = "00000000-0000-0000-0000-0000000000b1"
 #: The tests share the dev database with you, so they register under their own
 #: name and only ever look at rows carrying it.
 NAME = "regtest_fs"
@@ -81,7 +85,7 @@ async def two_workspaces():
         await create_tenant(t)
     async with platform_session() as s:
         await s.execute(delete(Tenant).where(Tenant.schema_key.in_([A, B])))
-        s.add_all([Tenant(name=A, schema_key=A, invite_code="test"), Tenant(name=B, schema_key=B, invite_code="test")])
+        s.add_all([Tenant(name=A, schema_key=A), Tenant(name=B, schema_key=B)])
 
     yield
 
@@ -134,7 +138,7 @@ def test_the_catalogue_is_just_prefilled_addresses():
 
 
 async def test_registering_asks_the_server_and_stores_risk(two_workspaces, filesystem):
-    async with tenant_session(A) as s:
+    async with tenant_session(A, ANNE) as s:
         view = await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem)
     by_name = {t.name: t.risk for t in view.tools}
     # Straight from the server's tools/list - 14 tools in the current release.
@@ -153,21 +157,21 @@ async def test_a_server_that_wants_a_token_is_reported_not_marked_down(
     "alive, needs a credential" - a different answer from "unreachable"."""
     from app.mcp_registry.mcp_client import AuthRequired
 
-    async with tenant_session(A) as s:
+    async with tenant_session(A, ANNE) as s:
         with pytest.raises(AuthRequired):
             await registry.register(s, name="remote", transport="http",
                                    endpoint=server_that_wants_a_token, auth_type="api_key")
-    async with tenant_session(A) as s:
+    async with tenant_session(A, ANNE) as s:
         assert mine(await registry.list_servers(s)) == []
 
 
 async def test_a_server_that_does_not_answer_is_not_saved(two_workspaces):
-    async with tenant_session(A) as s:
+    async with tenant_session(A, ANNE) as s:
         with pytest.raises(registry.ServerUnreachable):
             await registry.register(
                 s, name="ghost", transport="stdio", endpoint="python -c 'import sys; sys.exit(1)'",
             )
-    async with tenant_session(A) as s:
+    async with tenant_session(A, ANNE) as s:
         assert mine(await registry.list_servers(s)) == []
 
 
@@ -175,7 +179,7 @@ async def test_a_server_that_does_not_answer_is_not_saved(two_workspaces):
 
 
 async def test_refresh_marks_a_dead_server_down_and_a_live_one_ok(two_workspaces, filesystem):
-    async with tenant_session(A) as s:
+    async with tenant_session(A, ANNE) as s:
         await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem)
 
     # sabotage the stored endpoint so the next check cannot reach it
@@ -183,26 +187,26 @@ async def test_refresh_marks_a_dead_server_down_and_a_live_one_ok(two_workspaces
 
     from app.models.tenant import McpServer
 
-    async with tenant_session(A) as s:
+    async with tenant_session(A, ANNE) as s:
         await s.execute(update(McpServer).where(McpServer.name == NAME)
                         .values(endpoint="stdio://python -c 'raise SystemExit(1)'"))
-    async with tenant_session(A) as s:
+    async with tenant_session(A, ANNE) as s:
         assert await registry.refresh(s, NAME) == "down"
         row = await s.scalar(select(McpServer).where(McpServer.name == NAME))
         assert row.health == "down"
 
     # repair it: the next check brings it back
-    async with tenant_session(A) as s:
+    async with tenant_session(A, ANNE) as s:
         await s.execute(update(McpServer).where(McpServer.name == NAME)
                         .values(endpoint=f"stdio://{filesystem}"))
-    async with tenant_session(A) as s:
+    async with tenant_session(A, ANNE) as s:
         assert await registry.refresh(s, NAME) == "ok"
 
 
 async def test_the_sweep_visits_every_workspace(two_workspaces, filesystem):
     from app.mcp_registry import health
 
-    async with tenant_session(A) as s:
+    async with tenant_session(A, ANNE) as s:
         await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem)
     results = await health.check_everything()
     assert f"{A}/{NAME}" in results
@@ -212,47 +216,83 @@ async def test_the_sweep_visits_every_workspace(two_workspaces, filesystem):
 
 
 async def test_a_private_server_is_invisible_to_another_company(two_workspaces, filesystem):
-    async with tenant_session(A) as s:
+    async with tenant_session(A, ANNE) as s:
         await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem)
-    async with tenant_session(B) as s:
+    async with tenant_session(B, BEN) as s:
         assert mine(await registry.list_servers(s)) == []
 
 
 async def test_a_shared_server_is_visible_to_every_company(two_workspaces, filesystem):
-    async with tenant_session(A) as s:
+    async with platform_session() as s:  # the platform admin has no company
         view = await registry.register(
             s, name=NAME, transport="stdio", endpoint=filesystem,
-            visibility="shared", shared_by=A,
+            visibility="everyone", shared_by=A,
         )
-    assert view.visibility == "shared"
+    assert view.visibility == "everyone"
 
-    for tenant in (A, B):
-        async with tenant_session(tenant) as s:
+    for tenant, who in ((A, ANNE), (B, BEN)):
+        async with tenant_session(tenant, who) as s:
             seen = {v.name: v.visibility for v in mine(await registry.list_servers(s))}
-            assert seen == {NAME: "shared"}
+            assert seen == {NAME: "everyone"}
 
 
 async def test_a_private_server_shadows_a_shared_one_with_the_same_name(two_workspaces, filesystem):
     """A company can override a shared entry with its own copy."""
-    async with tenant_session(A) as s:
+    async with platform_session() as s:
         await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem,
-                               visibility="shared", shared_by=A)
-    async with tenant_session(B) as s:
+                               visibility="everyone", shared_by=A)
+    async with tenant_session(B, BEN) as s:
         await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem,
-                               description="Helios' own")
-    async with tenant_session(B) as s:
+                               description="Ben's own")
+    async with tenant_session(B, BEN) as s:
         views = mine(await registry.list_servers(s))
         assert len(views) == 1 and views[0].visibility == "private"
-        assert views[0].description == "Helios' own"
+        assert views[0].description == "Ben's own"
 
 
-def test_only_a_company_admin_can_share():
+# ------------------------------------------------- 5b. person versus person
+
+
+async def test_a_private_server_is_invisible_to_a_colleague(two_workspaces, filesystem):
+    async with tenant_session(A, ANNE) as s:
+        await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem)
+    async with tenant_session(A, ARUN) as s:
+        assert mine(await registry.list_servers(s)) == []
+
+
+async def test_a_company_server_is_visible_to_a_colleague_but_stays_the_owners(
+    two_workspaces, filesystem
+):
+    async with tenant_session(A, ANNE) as s:  # Anne is the company admin
+        await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem,
+                                visibility="company")
+    async with tenant_session(A, ARUN) as s:
+        views = mine(await registry.list_servers(s))
+        assert len(views) == 1 and views[0].visibility == "company"
+    async with tenant_session(B, BEN) as s:  # another company: still nothing
+        assert mine(await registry.list_servers(s)) == []
+
+
+async def test_the_sweep_sees_every_persons_servers(two_workspaces, filesystem):
+    from app.mcp_registry import health
+
+    async with tenant_session(A, ANNE) as s:
+        await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem)
+    async with tenant_session(A, ARUN) as s:
+        await registry.register(s, name=NAME, transport="stdio", endpoint=filesystem)
+    results = await health.check_everything()
+    assert sum(1 for k in results if k == f"{A}/{NAME}") >= 1
+
+
+def test_roles_are_three_and_only_the_platform_admin_has_no_company():
     from app.core.security import Claims
 
-    member = Claims("u", "t", "helios", "tom@x", "Tom", "member")
+    user = Claims("u", "t", "helios", "tom@x", "Tom", "user")
     admin = Claims("u", "t", "northwind", "priya@x", "Priya", "admin")
-    assert not member.is_admin
-    assert admin.is_admin
+    platform = Claims("u", None, None, "admin@forge.dev", "Platform admin", "platform_admin")
+    assert not user.is_company_admin and not user.is_platform_admin
+    assert admin.is_company_admin and not admin.is_platform_admin
+    assert platform.is_platform_admin and platform.tenant_key is None
 
 
 def test_a_windows_path_survives_parsing():

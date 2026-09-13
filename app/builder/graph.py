@@ -53,6 +53,7 @@ class BuildState(TypedDict, total=False):
 
     prompt: str
     tenant: str
+    user: str  # whose build this is: their servers, their connections, their agent
 
     # from understand()
     name: str
@@ -105,7 +106,7 @@ async def understand(state: BuildState) -> dict:
     ONE model call for the whole build. The catalogue is loaded from the
     database first so the model can only propose tools that really exist.
     """
-    async with tenant_session(state["tenant"]) as s:
+    async with tenant_session(state["tenant"], state["user"]) as s:
         views = await registry.list_servers(s)  # this company's + shared
 
     catalogue = [
@@ -196,7 +197,7 @@ async def check_connections(state: BuildState) -> dict:
     """Which servers does the chosen set need, and are we connected to each?"""
     required = sorted({ref.split(".", 1)[0] for ref in state.get("selected", [])})
 
-    async with tenant_session(state["tenant"]) as s:
+    async with tenant_session(state["tenant"], state["user"]) as s:
         active = {
             c.server_name
             for c in await s.scalars(select(Connection).where(Connection.status == "active"))
@@ -254,7 +255,7 @@ async def assemble(state: BuildState) -> dict:
     if not selected:
         return {"log": ["Nothing selected - no agent was created."]}
 
-    async with tenant_session(state["tenant"]) as s:
+    async with tenant_session(state["tenant"], state["user"]) as s:
         by_ref = {
             f"{v.name}.{t.name}": t
             for v in await registry.list_servers(s)
@@ -307,7 +308,7 @@ async def persist(state: BuildState) -> dict:
     if not state.get("config"):
         return {}
 
-    async with tenant_session(state["tenant"]) as s:
+    async with tenant_session(state["tenant"], state["user"]) as s:
         agent = Agent(
             name=state["config"]["name"],
             config=state["config"],

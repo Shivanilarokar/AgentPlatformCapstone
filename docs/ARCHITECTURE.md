@@ -178,6 +178,26 @@ agents = await s.scalars(select(Agent))       # note: no WHERE tenant_id, anywhe
    than on grants. Be honest about this in the design document, and name per-tenant database roles
    as the "with another month" answer. Do not overclaim.
 
+### The second layer: one PERSON cannot see a colleague's things
+
+Rule 2 is worded per person, not per company ("my agents, my connections, my runs — mine"). The
+schema handles companies; inside a company the same trick is repeated one level down with
+Postgres **row-level security**:
+
+- `agents`, `connections` and `mcp_servers` carry an `owner_id`.
+- The gate runs `set_config('app.user_id', <uuid>)` next to `SET LOCAL search_path`.
+- Each table has `ENABLE + FORCE ROW LEVEL SECURITY` and one policy:
+  `owner_id = current_setting('app.user_id')` (servers also allow `visibility = 'company'`).
+- `owner_id` has `DEFAULT current_setting('app.user_id')`, so no handler passes an owner, and the
+  policy's `WITH CHECK` refuses a row that claims someone else's id.
+
+Handlers still write `select(Agent)` with nothing to filter on. Two things make this real rather
+than decorative: the app connects as `forge_app`, a role with `NOSUPERUSER NOBYPASSRLS` (a superuser
+skips RLS silently), and a session that forgets to name a person sees **zero** rows, not all rows.
+
+The single deliberate exception is the health sweep, which sets `app.role = 'system'` to see every
+server in a schema; it never runs from a request.
+
 ### Check 9 falls out for free
 
 Tom at Helios asks for Priya's agent id. It simply is not in `t_helios`. The query returns zero rows,

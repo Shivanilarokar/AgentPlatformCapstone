@@ -7,12 +7,13 @@ from app.api.routers import agents, auth, builds, connections, servers
 from app.core.db import engine
 from app.mcp_registry import health as health_sweep
 from app.tenancy.checkpointers import close_all
-from app.tenancy.provision import bootstrap_platform
+from app.tenancy.provision import bootstrap_platform, ensure_platform_admin
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # The shared schema must exist before anyone can sign up.
     await bootstrap_platform()
+    await ensure_platform_admin()
     health_sweep.start()
     yield
     await health_sweep.stop()

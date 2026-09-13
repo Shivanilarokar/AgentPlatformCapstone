@@ -111,9 +111,9 @@ $ curl localhost:8000/health
 
 | URL | What | Login |
 |---|---|---|
-| <http://localhost:5173> | the product (React + Vite) | sign up with a new company name → you are its admin; with an existing name + its invite code → member |
+| <http://localhost:5173> | the product (React + Vite) | see §2 — `admin@forge.dev` is the platform admin; new company name at sign-up → its admin |
 | <http://localhost:8000/docs> | FastAPI Swagger | cookie from the UI, or paste the JWT |
-| <http://localhost:5050> | pgAdmin (the database, in a browser) | `admin@forge.dev` / `admin`; server `forge` is pre-registered |
+| <http://localhost:5050> | pgAdmin (the database, in a browser) | `admin@forge.dev` / `admin`; server `forge` is pre-registered (Postgres superuser — the app itself uses `forge_app`) |
 
 Code under `app/` and `web/src/` is volume-mounted: edit locally, the containers reload.
 Rebuild (`--build`) only when `pyproject.toml`, `Dockerfile` or `web/package.json` change.
@@ -140,47 +140,58 @@ form-vs-chat invariant and the CI check that no query ever schema-qualifies a te
 
 ---
 
-## 2. Test accounts (shared dev database)
+## 2. Accounts, roles, and the two layers of isolation
 
-Two companies; each has an **admin** (the person who created it) and a **member** (joined with the
-company's invite code). There is no platform-wide super-user: an admin runs their own company,
-can share a server with every company, and reviews the marketplace. Same password everywhere.
+Three roles. Same password everywhere: `Passw0rd!`.
 
-| Person | Email | Password | Company | Role | Invite code |
-|---|---|---|---|---|---|
-| Shivani | `shivani@northwind.example` | `Passw0rd!` | Northwind Labs (`t_northwind_labs`) | **admin** | `a8e392b6` |
-| Priya | `priya@northwind.example` | `Passw0rd!` | Northwind Labs | member | |
-| Jai | `jai@maven.example` | `Passw0rd!` | Maven (`t_maven`) | **admin** | `d9e9f300` |
-| Riya | `riya@maven.example` | `Passw0rd!` | Maven | member | |
+| Person | Email | Company | Role |
+|---|---|---|---|
+| Platform admin | `admin@forge.dev` | — (none) | **platform_admin** — seeded from `.env` at startup; the only one; cannot be created by sign-up |
+| Shivani | `shivani@northwind.example` | Northwind Labs (`t_northwind_labs`) | **admin** — created the company |
+| Priya | `priya@northwind.example` | Northwind Labs | user |
+| Jai | `jai@maven.example` | Maven (`t_maven`) | **admin** — created the company |
+| Riya | `riya@maven.example` | Maven | user |
 
-What each role can do:
+Sign-up: a company name nobody has used creates that company and makes you its admin; an existing
+name joins it as a user. Change the platform admin with `PLATFORM_ADMIN_EMAIL` /
+`PLATFORM_ADMIN_PASSWORD` in `.env`.
 
-| | member | admin |
-|---|---|---|
-| Registry: register a private server, re-check, see shared ones | ✅ | ✅ |
-| Registry: **Visible to → Everyone** (goes to `platform.mcp_servers`) | ✗ 403 | ✅ |
-| Connections, Build, My Agents — inside own workspace | ✅ | ✅ |
-| See the company's invite code (sidebar) | ✗ | ✅ |
-| **Admin Review** in the nav, `POST /v1/servers/health-sweep` | ✗ | ✅ |
-| Anything belonging to the *other* company | ✗ (404) | ✗ (404) |
+| | user | admin | platform_admin |
+|---|---|---|---|
+| Registry: see servers shared with everyone / in my company; register **Just me** | ✅ | ✅ | sees only *everyone* |
+| Registry: register with **My company** visibility | ✗ 403 | ✅ | — |
+| Registry: register with **Everyone** visibility | ✗ 403 | ✗ 403 | ✅ |
+| Connections, Build, My Agents | ✅ own only | ✅ own only | ✗ 404 (no workspace) |
+| **Admin Review** (marketplace approval), manual health sweep | ✗ | ✗ | ✅ |
+| Another person's agents / connections / private servers | ✗ | ✗ | ✗ |
 
-How joining works: sign up with an existing company name **and** its invite code → `member`.
-Without the code the API answers `403 bad_invite_code`, so nobody joins a company by guessing its
-name. The code is shown to admins in the sidebar and lives in `platform.tenants.invite_code`.
+### Two layers, neither one a WHERE clause
+
+1. **Company** — one Postgres schema per company. Every request runs
+   `SET LOCAL search_path TO "t_<company>", platform`, so a bare table name can only resolve to
+   that company's table. Another company's agent id finds zero rows → 404.
+2. **Person** — row-level security on `agents`, `connections` and `mcp_servers` inside each schema.
+   Every request also runs `set_config('app.user_id', <uuid>)`; the policy is
+   `owner_id = current_setting('app.user_id')` (or `visibility = 'company'` for servers). Postgres
+   fills `owner_id` in on INSERT from that same setting, so no handler ever passes an owner, and the
+   `WITH CHECK` half refuses a row claiming someone else's id.
+
+The app connects as `forge_app`, a role created **without** superuser and with `NOBYPASSRLS`
+(`docker/db/init.sql`) — Postgres superusers skip RLS entirely, which is why the superuser `forge`
+is kept for pgAdmin only. The health sweep is the one thing that sees every row in a schema; it sets
+`app.role = 'system'`, which the policies allow, and it never runs from a request.
+
+Tests: `tests/graded/test_check_01_isolation.py` covers company-vs-company **and** colleague-vs-
+colleague, including "a session that forgot to identify the person sees zero rows, not all rows".
 
 What is set up right now:
 
-- **Shared with everyone** (registered by Shivani, live in `platform.mcp_servers`): `filesystem`
-  (14 tools), `git` (12), `sqlite` (6). Both companies see them; no credential needed.
-- **Private to Northwind Labs**: `github` (44 tools) and `jira` (21) — discovered with Shivani's
-  tokens, which are encrypted in `t_northwind_labs.connections`. Priya sees and can use them
-  (same workspace); Jai and Riya cannot see them at all.
-- To share `github` too: as Shivani → Registry → `github` chip → paste PAT → Visible to
-  **Everyone** → Connect & save. Maven then sees the card with **Connect** until Jai or Riya adds
-  *their own* PAT — server entries are shared, credentials never are.
-
-If `reset_db.py` has been run, sign up again: Shivani (creates Northwind Labs), Jai (creates
-Maven), then Priya / Riya with the invite codes shown in each admin's sidebar.
+- **Shared with everyone** (registered by the platform admin, in `platform.mcp_servers`):
+  `filesystem`, `git`, `sqlite`. No credential needed; every company sees them.
+- **Shared in Northwind Labs** (Shivani, admin): `teamgit`. Priya sees it; Maven does not.
+- **Private to Priya**: `mydb`. Shivani — her own company's admin — cannot see it.
+- Nobody has connected `github` / `slack` / `jira` yet: the earlier tokens were sealed to the old
+  key shape and were wiped with the reset. Paste them again in the Registry.
 
 ---
 
@@ -238,7 +249,7 @@ when you register (or under **Connections** later). Every token is encrypted bef
    - `jira` — `https://mcp.atlassian.com/v2/mcp`, Atlassian's remote server. Needs a scoped API
      token, and your org admin must have enabled API-token auth for the Rovo MCP server.
    The platform connects out, calls `tools/list`, and stores what came back. Nobody types a tool in.
-   An admin can tick **Everyone**; anyone can register **Just my workspace**.
+   **Just me** for anyone; **My company** for the company admin; **Everyone** for the platform admin.
 3. **Connections** → a credential for any server you registered without one. Encrypted before it
    touches the database; the list shows dots, never the value.
 4. **Build** → *"read my open GitHub issues and post a summary to Slack"*. The build pauses twice
@@ -295,20 +306,21 @@ uv run python scripts/inspect_db.py                                         # ev
 | `platform.tenants` | `name` | the company as typed at sign-up, e.g. `Northwind Labs` |
 | | `schema_key` | `northwind_labs` — becomes the schema name `t_northwind_labs` |
 | `platform.users` | `tenant_id` | which company this person belongs to |
-| | `role` | `admin` (created the company) · `member` (joined with the invite code) |
-| | `invite_code` | what a colleague types at sign-up to join as a member; shown to the admin in the sidebar |
+| | `tenant_id` | which company; NULL for the platform admin |
+| | `role` | `platform_admin` (one, from .env) · `admin` (created the company) · `user` |
+| `t_*.agents / mcp_servers / connections` | `owner_id` | the person who made the row — filled by Postgres from the gate's `app.user_id`; RLS keys on it |
 | `*.mcp_servers` | `transport` | `stdio` · `http` · `sse` |
 | | `endpoint` | the URL, or the stdio command line |
 | | `auth_type` | `none` · `api_key` · `oauth` |
 | | `credential_env_var` | stdio only: the env var the subprocess reads its token from |
 | | `health` | `ok` · `down` — set by discovery and the 5-minute sweep, never typed |
-| | `visibility` | `private` (this company) · `shared` (everyone; `platform.mcp_servers` only) |
-| | `shared_by` | `schema_key` of the company whose admin shared it |
+| | `visibility` | `private` (just me) · `company` (everyone in my company) — rows in `platform.mcp_servers` are *everyone* |
+| | `shared_by` | `platform` — only the platform admin writes this table |
 | | `last_checked_at` | when the sweep last asked it for `tools/list` |
 | `*.mcp_tools` | `input_schema` | the JSON schema the server published for the tool's arguments |
 | | `risk` | `read` · `write` · `destructive` — derived by `mcp_registry/risk.py` |
 | `t_*.connections` | `server_name` | which server this credential is for |
-| | `encrypted_secret` | the token, AES-256-GCM under a per-row data key |
+| | `encrypted_secret` | the token, AES-256-GCM under a per-row data key, bound to company + person + server |
 | | `secret_nonce` | GCM nonce for the line above |
 | | `encrypted_data_key` | that data key, itself encrypted under `FORGE_MASTER_KEY` |
 | | `data_key_nonce` | GCM nonce for the line above |

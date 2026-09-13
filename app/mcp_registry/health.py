@@ -56,13 +56,15 @@ async def check_everything() -> dict[str, str]:
 
     for tenant_key in keys:
         try:
-            async with tenant_session(tenant_key) as s:
+            # system=True: the sweep sees every person's servers in this schema
+            async with tenant_session(tenant_key, system=True) as s:
                 for srv in await s.scalars(select(McpServer)):
                     try:
-                        # Borrowed for this one tools/list call, then dropped.
-                        token = await vault.use(s, tenant=tenant_key, server_name=srv.name)
+                        # The OWNER's credential, borrowed for one tools/list, then dropped.
+                        token = await vault.use(s, tenant=tenant_key, user_id=str(srv.owner_id),
+                                                server_name=srv.name)
                         results[f"{tenant_key}/{srv.name}"] = await registry.refresh(
-                            s, srv.name, token=token
+                            s, srv.name, token=token, server_id=srv.id
                         )
                         del token
                     except Exception as exc:  # noqa: BLE001

@@ -32,12 +32,17 @@ async def add(
     session: AsyncSession,
     *,
     tenant: str,
+    user_id: str,
     server_name: str,
     secret: str,
     added_by: str = "",
 ) -> Connection:
-    """Encrypt immediately. `secret` is not stored, logged or returned."""
-    sealed = envelope.seal(secret, tenant=tenant, server_name=server_name)
+    """Encrypt immediately. `secret` is not stored, logged or returned.
+
+    The row is this PERSON's: row-level security scopes the lookup below to the
+    signed-in user, and the ciphertext is bound to tenant + user + server.
+    """
+    sealed = envelope.seal(secret, tenant=tenant, user_id=user_id, server_name=server_name)
 
     conn = await session.scalar(
         select(Connection).where(Connection.server_name == server_name)
@@ -77,14 +82,18 @@ async def revoke(session: AsyncSession, server_name: str) -> Connection:
     return conn
 
 
-async def use(session: AsyncSession, *, tenant: str, server_name: str) -> str | None:
+async def use(
+    session: AsyncSession, *, tenant: str, user_id: str, server_name: str
+) -> str | None:
     """Decrypt for ONE tool call. Returns None if this workspace has no key.
 
     None is not an error - it is the "degraded" path. The caller turns it into a
     sentence the model can read, never an exception.
     """
     conn = await session.scalar(
-        select(Connection).where(Connection.server_name == server_name)
+        select(Connection).where(
+            Connection.server_name == server_name, Connection.owner_id == user_id
+        )
     )
     if conn is None or conn.status != "active" or not conn.encrypted_secret:
         return None
@@ -97,7 +106,7 @@ async def use(session: AsyncSession, *, tenant: str, server_name: str) -> str | 
         master_key_version=conn.master_key_version,
     )
     try:
-        secret = envelope.open_(sealed, tenant=tenant, server_name=server_name)
+        secret = envelope.open_(sealed, tenant=tenant, user_id=user_id, server_name=server_name)
     except envelope.VaultError:
         # Wrong master key, or the row does not belong here. Degrade, do not crash.
         return None

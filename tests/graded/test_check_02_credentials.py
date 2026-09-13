@@ -23,6 +23,8 @@ from app.vault import connections, envelope
 SENTINEL = "xoxb-GRADER-9f2a-DO-NOT-LEAK-4c81"
 TENANT = "vaulttest"
 SERVER = "slack"
+ME = "00000000-0000-0000-0000-00000000c001"
+COLLEAGUE = "00000000-0000-0000-0000-00000000c002"
 
 
 @pytest.fixture
@@ -38,40 +40,47 @@ async def workspace():
 
 
 def test_the_sealed_form_contains_no_trace_of_the_secret():
-    sealed = envelope.seal(SENTINEL, tenant=TENANT, server_name=SERVER)
+    sealed = envelope.seal(SENTINEL, tenant=TENANT, user_id=ME, server_name=SERVER)
     blob = sealed.encrypted_secret + sealed.secret_nonce + sealed.encrypted_data_key + sealed.data_key_nonce
     assert SENTINEL.encode() not in blob
     assert b"xoxb" not in blob
 
 
 def test_it_round_trips_for_the_owner():
-    sealed = envelope.seal(SENTINEL, tenant=TENANT, server_name=SERVER)
-    assert envelope.open_(sealed, tenant=TENANT, server_name=SERVER) == SENTINEL
+    sealed = envelope.seal(SENTINEL, tenant=TENANT, user_id=ME, server_name=SERVER)
+    assert envelope.open_(sealed, tenant=TENANT, user_id=ME, server_name=SERVER) == SENTINEL
 
 
 def test_a_row_stolen_into_another_workspace_will_not_decrypt():
     """The AAD binds encrypted_secret to tenant+server, so a copied row is inert."""
-    sealed = envelope.seal(SENTINEL, tenant=TENANT, server_name=SERVER)
+    sealed = envelope.seal(SENTINEL, tenant=TENANT, user_id=ME, server_name=SERVER)
     with pytest.raises(envelope.VaultError):
-        envelope.open_(sealed, tenant="someone_else", server_name=SERVER)
+        envelope.open_(sealed, tenant="someone_else", user_id=ME, server_name=SERVER)
 
 
 def test_a_row_reused_for_a_different_server_will_not_decrypt():
-    sealed = envelope.seal(SENTINEL, tenant=TENANT, server_name=SERVER)
+    sealed = envelope.seal(SENTINEL, tenant=TENANT, user_id=ME, server_name=SERVER)
     with pytest.raises(envelope.VaultError):
-        envelope.open_(sealed, tenant=TENANT, server_name="github")
+        envelope.open_(sealed, tenant=TENANT, user_id=ME, server_name="github")
+
+
+def test_a_row_reused_by_a_colleague_will_not_decrypt():
+    """Same company, same server, different PERSON - still inert."""
+    sealed = envelope.seal(SENTINEL, tenant=TENANT, user_id=ME, server_name=SERVER)
+    with pytest.raises(envelope.VaultError):
+        envelope.open_(sealed, tenant=TENANT, user_id=COLLEAGUE, server_name=SERVER)
 
 
 def test_two_secrets_never_share_a_data_key():
-    a = envelope.seal(SENTINEL, tenant=TENANT, server_name=SERVER)
-    b = envelope.seal(SENTINEL, tenant=TENANT, server_name=SERVER)
+    a = envelope.seal(SENTINEL, tenant=TENANT, user_id=ME, server_name=SERVER)
+    b = envelope.seal(SENTINEL, tenant=TENANT, user_id=ME, server_name=SERVER)
     assert a.encrypted_data_key != b.encrypted_data_key
     assert a.encrypted_secret != b.encrypted_secret  # same plaintext, different encrypted_secret
 
 
 def test_an_empty_secret_is_refused():
     with pytest.raises(envelope.VaultError):
-        envelope.seal("", tenant=TENANT, server_name=SERVER)
+        envelope.seal("", tenant=TENANT, user_id=ME, server_name=SERVER)
 
 
 # ------------------------------------------------------- the storage boundary
@@ -79,8 +88,8 @@ def test_an_empty_secret_is_refused():
 
 async def test_the_database_holds_nothing_readable(workspace):
     """THE CHECK. Store the token, then grep every column of every table."""
-    async with tenant_session(TENANT) as s:
-        await connections.add(s, tenant=TENANT, server_name=SERVER, secret=SENTINEL,
+    async with tenant_session(TENANT, ME) as s:
+        await connections.add(s, tenant=TENANT, user_id=ME, server_name=SERVER, secret=SENTINEL,
                           added_by="grader@example.com")
 
     found: list[str] = []
@@ -105,36 +114,45 @@ async def test_the_database_holds_nothing_readable(workspace):
 
 async def test_it_is_still_usable_after_all_that(workspace):
     """Encrypted is only useful if it can still be lent out for one call."""
-    async with tenant_session(TENANT) as s:
-        await connections.add(s, tenant=TENANT, server_name=SERVER, secret=SENTINEL)
+    async with tenant_session(TENANT, ME) as s:
+        await connections.add(s, tenant=TENANT, user_id=ME, server_name=SERVER, secret=SENTINEL)
 
-    async with tenant_session(TENANT) as s:
-        assert await connections.use(s, tenant=TENANT, server_name=SERVER) == SENTINEL
+    async with tenant_session(TENANT, ME) as s:
+        assert await connections.use(s, tenant=TENANT, user_id=ME, server_name=SERVER) == SENTINEL
 
 
 async def test_a_revoked_connection_returns_none_rather_than_raising(workspace):
     """None is the DEGRADED path. The agent keeps working and reports the gap."""
-    async with tenant_session(TENANT) as s:
-        await connections.add(s, tenant=TENANT, server_name=SERVER, secret=SENTINEL)
-    async with tenant_session(TENANT) as s:
+    async with tenant_session(TENANT, ME) as s:
+        await connections.add(s, tenant=TENANT, user_id=ME, server_name=SERVER, secret=SENTINEL)
+    async with tenant_session(TENANT, ME) as s:
         await connections.revoke(s, SERVER)
 
-    async with tenant_session(TENANT) as s:
-        assert await connections.use(s, tenant=TENANT, server_name=SERVER) is None
+    async with tenant_session(TENANT, ME) as s:
+        assert await connections.use(s, tenant=TENANT, user_id=ME, server_name=SERVER) is None
 
 
 async def test_revoking_wipes_the_ciphertext(workspace):
-    async with tenant_session(TENANT) as s:
-        await connections.add(s, tenant=TENANT, server_name=SERVER, secret=SENTINEL)
-    async with tenant_session(TENANT) as s:
+    async with tenant_session(TENANT, ME) as s:
+        await connections.add(s, tenant=TENANT, user_id=ME, server_name=SERVER, secret=SENTINEL)
+    async with tenant_session(TENANT, ME) as s:
         conn = await connections.revoke(s, SERVER)
         assert conn.encrypted_secret == b""
         assert conn.encrypted_data_key == b""
 
 
+async def test_a_colleague_cannot_use_my_connection(workspace):
+    """Row-level security: my credential row does not exist for a colleague."""
+    async with tenant_session(TENANT, ME) as s:
+        await connections.add(s, tenant=TENANT, user_id=ME, server_name=SERVER, secret=SENTINEL)
+    async with tenant_session(TENANT, COLLEAGUE) as s:
+        assert await connections.list_connections(s) == []
+        assert await connections.use(s, tenant=TENANT, user_id=COLLEAGUE, server_name=SERVER) is None
+
+
 async def test_a_server_never_connected_is_simply_absent(workspace):
-    async with tenant_session(TENANT) as s:
-        assert await connections.use(s, tenant=TENANT, server_name="github") is None
+    async with tenant_session(TENANT, ME) as s:
+        assert await connections.use(s, tenant=TENANT, user_id=ME, server_name="github") is None
 
 
 # ------------------------------------------------------------- the API surface

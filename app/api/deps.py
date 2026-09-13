@@ -2,10 +2,11 @@
 
 Every authenticated endpoint takes `session: AsyncSession = Depends(tenant_db)`.
 That is the ONLY way a handler gets a database session, and by the time it does,
-Postgres is already pointed at exactly one company's schema.
+Postgres is already pointed at exactly one company's schema AND one person's
+rows (see app/core/db.py).
 
-After that, handlers write `select(Agent)` with no tenant filter. There is no
-filter to delete, which is what graded check 1 tests.
+After that, handlers write `select(Agent)` with no tenant filter and no owner
+filter. There is no filter to delete, which is what graded check 1 tests.
 """
 
 from __future__ import annotations
@@ -15,12 +16,10 @@ from collections.abc import AsyncIterator
 import jwt
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.db import SessionLocal
+from app.core.db import platform_session, tenant_session
 from app.core.security import Claims, read_token
-from app.tenancy.schema_names import schema_for
 
 #: auto_error=False so we can also accept the cookie the browser UI sets.
 bearer = HTTPBearer(auto_error=False)
@@ -41,28 +40,27 @@ def current_user(
         raise HTTPException(401, detail={"error": "bad_token"}) from None
 
 
-def require_admin(claims: Claims = Depends(current_user)) -> Claims:
-    if not claims.is_admin:
+def require_platform_admin(claims: Claims = Depends(current_user)) -> Claims:
+    if not claims.is_platform_admin:
         raise HTTPException(404, detail=NOT_FOUND)  # never confirm the route exists
     return claims
 
 
-async def tenant_db(claims: Claims = Depends(current_user)) -> AsyncIterator[AsyncSession]:
-    """Open a transaction, point Postgres at this company's schema, and yield.
+def workspace_user(claims: Claims = Depends(current_user)) -> Claims:
+    """Someone who belongs to a company. The platform admin has no workspace,
+    so every workspace route is simply not there for them."""
+    if claims.tenant_key is None:
+        raise HTTPException(404, detail=NOT_FOUND)
+    return claims
 
-    SET LOCAL is scoped to the transaction, so the setting cannot leak onto the
-    next request that borrows this pooled connection.
-    """
-    schema = schema_for(claims.tenant_key)  # validated before it touches SQL
-    async with SessionLocal() as session:
-        async with session.begin():
-            await session.execute(text(f'SET LOCAL search_path TO "{schema}", platform'))
-            yield session
+
+async def tenant_db(claims: Claims = Depends(workspace_user)) -> AsyncIterator[AsyncSession]:
+    """One transaction, pointed at this company's schema and this person's rows."""
+    async with tenant_session(claims.tenant_key, claims.user_id) as session:
+        yield session
 
 
 async def platform_db() -> AsyncIterator[AsyncSession]:
-    """For sign-in only: we do not know the tenant yet, so no gate is possible."""
-    async with SessionLocal() as session:
-        async with session.begin():
-            await session.execute(text('SET LOCAL search_path TO "platform"'))
-            yield session
+    """For sign-in and the platform admin: no company, so only the shared schema."""
+    async with platform_session() as session:
+        yield session

@@ -19,6 +19,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
@@ -26,11 +27,17 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
 
+#: Filled in by Postgres from the session variable the gate sets, so no handler
+#: ever passes an owner - and row-level security refuses a row whose owner is
+#: not the signed-in user. See app/tenancy/provision.py for the policies.
+CURRENT_USER = text("NULLIF(current_setting('app.user_id', true), '')::uuid")
+
 
 class Agent(Base):
     __tablename__ = "agents"
 
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), server_default=CURRENT_USER)
     name: Mapped[str] = mapped_column(String(120))
     config: Mapped[dict] = mapped_column(JSONB, default=dict)  # the AgentConfig document (app/builder/schema.py)
     status: Mapped[str] = mapped_column(String(20), default="draft")
@@ -45,9 +52,11 @@ class McpServer(Base):
     """
 
     __tablename__ = "mcp_servers"
+    __table_args__ = (UniqueConstraint("owner_id", "name", name="uq_server_per_owner"),)
 
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name: Mapped[str] = mapped_column(String(50), unique=True)
+    owner_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), server_default=CURRENT_USER)
+    name: Mapped[str] = mapped_column(String(50))
     transport: Mapped[str] = mapped_column(String(20))  # stdio | http | sse
     endpoint: Mapped[str] = mapped_column(String(500))
     auth_type: Mapped[str] = mapped_column(String(20), default="none")  # none | api_key | oauth
@@ -55,8 +64,9 @@ class McpServer(Base):
     credential_env_var: Mapped[str | None] = mapped_column(String(80), nullable=True)
     description: Mapped[str] = mapped_column(Text, default="")
     health: Mapped[str] = mapped_column(String(10), default="ok")  # ok | down
-    #: "shared" ships with the platform; "private" was registered by this company
-    visibility: Mapped[str] = mapped_column(String(10), default="shared")
+    #: "private" = only the person who registered it. "company" = everyone in
+    #: this company (admins only can set it). Row-level security enforces both.
+    visibility: Mapped[str] = mapped_column(String(10), default="private")
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -90,7 +100,7 @@ class McpTool(Base):
 
 
 class Connection(Base):
-    """One company's credential for one server.
+    """One PERSON's credential for one server.
 
     Nothing readable is stored. See app/vault/envelope.py for the shape - the
     secret is encrypted under a per-connection data key, which is itself
@@ -98,9 +108,11 @@ class Connection(Base):
     """
 
     __tablename__ = "connections"
+    __table_args__ = (UniqueConstraint("owner_id", "server_name", name="uq_connection_per_owner"),)
 
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    server_name: Mapped[str] = mapped_column(String(50), unique=True)
+    owner_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), server_default=CURRENT_USER)
+    server_name: Mapped[str] = mapped_column(String(50))
 
     # --- the sealed secret. Every one of these is encrypted_secret. ----------------
     encrypted_secret: Mapped[bytes] = mapped_column(LargeBinary)
