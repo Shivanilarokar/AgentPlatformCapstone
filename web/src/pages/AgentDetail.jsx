@@ -96,6 +96,58 @@ function AgentGraph({ graph }) {
   );
 }
 
+/* ------------------------------------------------------------------ scores */
+
+function ScoresCard({ score }) {
+  const [showWhy, setShowWhy] = useState(false);
+  if (!score || !score.safety_checks) return <Card><span className="muted">Not scored yet.</span></Card>;
+  const passed = score.safety_checks.filter((c) => c.passed).length;
+  return (
+    <Card>
+      <div className="between" style={{ marginBottom: 12 }}>
+        <div>
+          <div className="faint" style={{ fontSize: 11.5 }}>Does it work?</div>
+          <div style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.1 }}>{score.quality}</div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div className="faint" style={{ fontSize: 11.5 }}>Is it safe?</div>
+          <div style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.1 }}>{score.grade}</div>
+        </div>
+      </div>
+      <hr className="sep" style={{ margin: "10px 0" }} />
+      {score.safety_checks.map((c) => (
+        <Check key={c.key} ok={c.passed}>{c.label}{c.passed ? "" : ` — ${c.detail}`}</Check>
+      ))}
+      <hr className="sep" style={{ margin: "10px 0" }} />
+      <div className="faint" style={{ fontSize: 12 }}>
+        {passed} of 5 → <b>{score.grade}</b>. Every number here traces to a check you can point at.
+        No model guesses a score.{" "}
+        <button className="linkish" style={{ padding: 0, fontSize: 12 }} onClick={() => setShowWhy(!showWhy)}>
+          {showWhy ? "hide" : "why " + score.quality + "?"}
+        </button>
+      </div>
+      {showWhy && (
+        <table className="t" style={{ marginTop: 10, fontSize: 12 }}>
+          <tbody>
+            {score.quality_checks.map((c) => (
+              <tr key={c.key}>
+                <td>{c.label}</td>
+                <td className="muted">{c.detail}</td>
+                <td className="mono" style={{ textAlign: "right" }}>{c.points}/{c.max_points}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {score.blocked_by?.length > 0 && (
+        <Note tone="warn" style={{ marginTop: 10, fontSize: 12 }}>
+          <b>Cannot be published yet:</b> {score.blocked_by.join("; ")}.
+        </Note>
+      )}
+    </Card>
+  );
+}
+
 /* ------------------------------------------------------------------- tabs */
 
 function Overview({ a }) {
@@ -137,21 +189,7 @@ function Overview({ a }) {
 
       <div>
         <SectionTitle style={{ marginTop: 0 }}>Scores</SectionTitle>
-        <Card>
-          <Note tone="">
-            <b>Not scored yet — step 9.</b> Two numbers, each traceable to a check you can
-            point at. No model guesses a score.
-          </Note>
-          <div style={{ marginTop: 10 }}>
-            <Check ok={guarded.length === cfg.tools.filter((t) => t.risk !== "read").length}>
-              Write and destructive tools require approval
-            </Check>
-            <Check ok={cfg.requires_connections.length > 0}>
-              Declares the connections it needs
-            </Check>
-            <Check ok={a.runs > 0}>{a.runs > 0 ? `Run ${a.runs} time${a.runs === 1 ? "" : "s"}` : "Not yet run in the playground"}</Check>
-          </div>
-        </Card>
+        <ScoresCard score={a.score} />
 
         <SectionTitle>Details</SectionTitle>
         <Card>

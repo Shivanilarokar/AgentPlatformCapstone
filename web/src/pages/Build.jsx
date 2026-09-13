@@ -194,6 +194,13 @@ export default function Build() {
     setBusy(false);
   }
 
+  const [score, setScore] = useState(null);
+  useEffect(() => {
+    if (state?.status === "done" && state.agent_id) {
+      get(`/v1/agents/${state.agent_id}/scores`).then(setScore).catch(() => setScore(null));
+    } else setScore(null);
+  }, [state?.status, state?.agent_id]);
+
   const kind = state?.interrupt?.type;
   const at = !state ? "understand"
     : kind === "select_tools" ? "select"
@@ -278,6 +285,11 @@ export default function Build() {
                               .map((t) => t.ref).join(", ") || "none needed"}</dd>
                         <dt>Needs</dt>
                         <dd>{state.config?.requires_connections.join(", ")}</dd>
+                        <dt>Score</dt>
+                        <dd>{score
+                          ? <><b>{score.quality}</b> / 100 · safety <b>{score.grade}</b>
+                              <span className="faint"> — untested; run it in the playground to earn points</span></>
+                          : <span className="faint">scoring…</span>}</dd>
                       </dl>
                       <hr className="sep" />
                       <Link className="btn primary sm" to="/agents">Go to My Agents</Link>

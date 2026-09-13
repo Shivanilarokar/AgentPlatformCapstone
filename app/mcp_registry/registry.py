@@ -40,6 +40,13 @@ class ServerUnreachable(Exception):
     """The server did not answer, so nothing was saved."""
 
 
+def _why(exc: BaseException) -> str:
+    """The innermost message. MCP wraps failures in nested ExceptionGroups."""
+    while getattr(exc, "exceptions", None):
+        exc = exc.exceptions[0]  # type: ignore[attr-defined]
+    return f"{type(exc).__name__}: {str(exc)[:160]}"
+
+
 @dataclass
 class ServerView:
     """One row of the registry as the screen sees it, whichever table it came from."""
@@ -124,7 +131,7 @@ async def discover(ep: Endpoint, token: str | None) -> list[DiscoveredTool]:
     except AuthRequired:
         raise
     except Exception as exc:  # noqa: BLE001 - any failure means "do not save"
-        raise ServerUnreachable(f"could not reach {ep.display}: {type(exc).__name__}") from exc
+        raise ServerUnreachable(f"could not reach {ep.display}: {_why(exc)}") from exc
     if not found:
         raise ServerUnreachable(f"{ep.display} answered but reported no tools")
     return found
@@ -229,7 +236,8 @@ async def refresh(
         # which is what this check is for; the tool list stays as last seen.
         server.health = "ok"
         return "ok"
-    except ServerUnreachable:
+    except ServerUnreachable as exc:
+        log.warning("health: %s is down - %s", name, exc)
         server.health = "down"
         return "down"
 
