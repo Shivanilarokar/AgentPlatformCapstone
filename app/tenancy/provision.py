@@ -1,5 +1,6 @@
-"""Creating a company: one CREATE SCHEMA, then that company's tables inside it,
-then the row-level security that keeps each PERSON's rows their own.
+"""Creating a company: one CREATE SCHEMA, that company's tables inside it, the
+row-level security that keeps each PERSON's rows their own, and a database ROLE
+that can reach this schema and no other.
 
 Three separate jobs, deliberately:
 
@@ -65,7 +66,13 @@ async def ensure_platform_admin() -> None:
 
 async def create_tenant(tenant_key: str) -> str:
     """CREATE SCHEMA t_<key>, build this company's tables inside it, lock rows to
-    their owners."""
+    their owners, and create the role a request will run as.
+
+    The role has the same name as the schema. It can USE this schema and read the
+    shared platform tables - nothing else. So even a request whose search_path
+    somehow named another company would get "permission denied for schema", not
+    another company's rows.
+    """
     schema = schema_for(tenant_key)
     async with engine.begin() as conn:
         await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
@@ -80,6 +87,29 @@ async def create_tenant(tenant_key: str) -> str:
             await conn.execute(text(
                 f"CREATE POLICY owner_only ON {table} USING ({using}) WITH CHECK ({check})"
             ))
+
+        # --- the company's role ------------------------------------------
+        await conn.execute(text(f"""
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{schema}') THEN
+                    CREATE ROLE "{schema}" NOLOGIN NOBYPASSRLS;
+                END IF;
+            END $$
+        """))
+        await conn.execute(text(f'GRANT "{schema}" TO CURRENT_USER'))  # so the app may SET ROLE to it
+        await conn.execute(text(f'GRANT USAGE ON SCHEMA "{schema}" TO "{schema}"'))
+        await conn.execute(text(
+            f'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA "{schema}" TO "{schema}"'
+        ))
+        await conn.execute(text(
+            f'ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema}" '
+            f'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "{schema}"'
+        ))
+        await conn.execute(text(f'GRANT USAGE ON SCHEMA "{PLATFORM_SCHEMA}" TO "{schema}"'))
+        await conn.execute(text(
+            f'GRANT SELECT ON "{PLATFORM_SCHEMA}".tenants, "{PLATFORM_SCHEMA}".users, '
+            f'"{PLATFORM_SCHEMA}".mcp_servers, "{PLATFORM_SCHEMA}".mcp_tools TO "{schema}"'
+        ))
     return schema
 
 
@@ -88,3 +118,11 @@ async def drop_tenant(tenant_key: str) -> None:
     schema = schema_for(tenant_key)
     async with engine.begin() as conn:
         await conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        await conn.execute(text(f"""
+            DO $$ BEGIN
+                IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{schema}') THEN
+                    EXECUTE 'DROP OWNED BY "{schema}"';
+                    EXECUTE 'DROP ROLE "{schema}"';
+                END IF;
+            END $$
+        """))

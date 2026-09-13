@@ -63,8 +63,8 @@ function ServerCard({ server, onRefresh, platformAdmin }) {
         <div className="row" style={{ gap: 8 }}>
           <b style={{ fontSize: 14.5 }} title={server.endpoint}>{server.name}</b>
           <Badge tone={server.health === "ok" ? "ok" : "danger"} dot>{server.health}</Badge>
-          {server.visibility === "private" && <Badge>just me</Badge>}
-          {server.visibility === "company" && <Badge>company</Badge>}
+          {server.visibility !== "everyone" && <Badge>private</Badge>}
+          {server.visibility === "company" && <Badge tone="ok">whole company</Badge>}
         </div>
         {platformAdmin ? null : server.connected
           ? <Badge tone="ok">connected</Badge>
@@ -233,13 +233,12 @@ function RegisterForm({ catalogue, role, onRegistered }) {
             <Field label="Visible to">
               <select value={f.visibility} onChange={set("visibility")} style={{ marginBottom: 2 }}>
                 {platformAdmin ? (
-                  <option value="everyone">Everyone (all companies)</option>
+                  <option value="everyone">Everyone (admin only)</option>
                 ) : (
                   <>
-                    <option value="private">Just me</option>
-                    <option value="company" disabled={role !== "admin"}>
-                      My company{role === "admin" ? "" : " (company admin only)"}
-                    </option>
+                    <option value="private">Just my workspace</option>
+                    {role === "admin" && <option value="company">My whole company</option>}
+                    <option value="everyone" disabled>Everyone (admin only)</option>
                   </>
                 )}
               </select>
@@ -314,9 +313,10 @@ export default function Registry() {
   if (!servers) return <Loading what="the registry" />;
 
   const platformAdmin = me?.role === "platform_admin";
-  const everyone = servers.filter((s) => s.visibility === "everyone");
-  const company = servers.filter((s) => s.visibility === "company");
-  const mine = servers.filter((s) => s.visibility === "private");
+  const shared = servers.filter((s) => s.visibility === "everyone");
+  // The mockup's "Private to Northwind Labs": what this person can use inside
+  // the company - their own registrations, plus any the admin opened company-wide.
+  const priv = servers.filter((s) => s.visibility !== "everyone");
 
   return (
     <>
@@ -334,31 +334,22 @@ export default function Registry() {
           </Empty>
         )}
 
-        {everyone.length > 0 && (
+        {shared.length > 0 && (
           <>
-            <SectionTitle style={{ marginTop: 0 }}>Shared with everyone</SectionTitle>
+            <SectionTitle style={{ marginTop: 0 }}>Shared servers</SectionTitle>
             <div className="grid">
-              {everyone.map((s) => (
+              {shared.map((s) => (
                 <ServerCard key={s.name} server={s} onRefresh={load} platformAdmin={platformAdmin} />
               ))}
             </div>
           </>
         )}
 
-        {company.length > 0 && (
+        {priv.length > 0 && (
           <>
-            <SectionTitle>Shared in {me?.company ?? "this company"}</SectionTitle>
+            <SectionTitle>Private to {me?.company ?? "this workspace"}</SectionTitle>
             <div className="grid">
-              {company.map((s) => <ServerCard key={s.name} server={s} onRefresh={load} />)}
-            </div>
-          </>
-        )}
-
-        {mine.length > 0 && (
-          <>
-            <SectionTitle>Private to you</SectionTitle>
-            <div className="grid">
-              {mine.map((s) => <ServerCard key={s.name} server={s} onRefresh={load} />)}
+              {priv.map((s) => <ServerCard key={s.name} server={s} onRefresh={load} />)}
             </div>
           </>
         )}

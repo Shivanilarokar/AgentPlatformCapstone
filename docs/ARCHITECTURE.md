@@ -174,9 +174,10 @@ agents = await s.scalars(select(Agent))       # note: no WHERE tenant_id, anywhe
 2. **Never schema-qualify a tenant table** (`t_helios.agents`). One such query defeats the whole
    design. Add a CI grep on day 2 that fails the build on `t_` inside a SQL string or a SQLAlchemy
    `schema=` argument.
-3. **The app role has `USAGE` on every tenant schema**, so isolation rests on the search path rather
-   than on grants. Be honest about this in the design document, and name per-tenant database roles
-   as the "with another month" answer. Do not overclaim.
+3. ~~The app role has `USAGE` on every tenant schema~~ — closed. Every company gets a Postgres
+   role named after its schema (`t_northwind_labs`) with `USAGE` on that schema and read access to
+   the shared platform tables, nothing else. The gate runs `SET LOCAL ROLE "t_<company>"` before
+   `search_path`, so even a schema-qualified query for another company is *denied*, not answered.
 
 ### The second layer: one PERSON cannot see a colleague's things
 
@@ -197,6 +198,11 @@ skips RLS silently), and a session that forgets to name a person sees **zero** r
 
 The single deliberate exception is the health sweep, which sets `app.role = 'system'` to see every
 server in a schema; it never runs from a request.
+
+**Build threads.** LangGraph's checkpoint tables are keyed by `thread_id` and have no owner column,
+so the owner is put *into* the key: `<user_id>/<build id>`. A colleague who pastes my build id
+addresses `<their id>/<my id>` — a thread that does not exist. There is no ownership check in the
+handler to forget.
 
 ### Check 9 falls out for free
 

@@ -6,8 +6,11 @@ Everything downstream depends on that being true, so keep it that way.
 Two layers of isolation, both set on the connection rather than written into
 queries, so there is no filter anywhere in a handler that could be forgotten:
 
-    company  SET LOCAL search_path TO "t_<company>", platform
-             -> an unqualified table name can only resolve to this company
+    company  SET LOCAL ROLE "t_<company>"
+             SET LOCAL search_path TO "t_<company>", platform
+             -> the role can USE only this company's schema (plus the shared
+                platform tables), so an unqualified table name can only resolve
+                here, and a qualified one for another company is denied
 
     person   SET LOCAL app.user_id = '<uuid>'
              -> row-level security on agents / connections / mcp_servers lets
@@ -38,6 +41,7 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 async def _point_at(session: AsyncSession, tenant_key: str, user_id: str | None, system: bool) -> None:
     schema = schema_for(tenant_key)  # validated; safe to interpolate
+    await session.execute(text(f'SET LOCAL ROLE "{schema}"'))
     await session.execute(text(f'SET LOCAL search_path TO "{schema}", platform'))
     if system:
         # The health sweep: sees every row in the schema so it can re-check every

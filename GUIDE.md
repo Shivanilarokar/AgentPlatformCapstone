@@ -167,9 +167,11 @@ name joins it as a user. Change the platform admin with `PLATFORM_ADMIN_EMAIL` /
 
 ### Two layers, neither one a WHERE clause
 
-1. **Company** — one Postgres schema per company. Every request runs
-   `SET LOCAL search_path TO "t_<company>", platform`, so a bare table name can only resolve to
-   that company's table. Another company's agent id finds zero rows → 404.
+1. **Company** — one Postgres schema per company **and one Postgres role per company** (same
+   name). Every request runs `SET LOCAL ROLE "t_<company>"` then
+   `SET LOCAL search_path TO "t_<company>", platform`. The role can use only its own schema, so a
+   bare table name resolves there and a query naming another company's schema is *denied*.
+   Another company's agent id finds zero rows → 404.
 2. **Person** — row-level security on `agents`, `connections` and `mcp_servers` inside each schema.
    Every request also runs `set_config('app.user_id', <uuid>)`; the policy is
    `owner_id = current_setting('app.user_id')` (or `visibility = 'company'` for servers). Postgres
@@ -179,7 +181,8 @@ name joins it as a user. Change the platform admin with `PLATFORM_ADMIN_EMAIL` /
 The app connects as `forge_app`, a role created **without** superuser and with `NOBYPASSRLS`
 (`docker/db/init.sql`) — Postgres superusers skip RLS entirely, which is why the superuser `forge`
 is kept for pgAdmin only. The health sweep is the one thing that sees every row in a schema; it sets
-`app.role = 'system'`, which the policies allow, and it never runs from a request.
+`app.role = 'system'`, which the policies allow, and it never runs from a request. Build threads are
+keyed `<user_id>/<build id>`, so a colleague's build id names a thread that does not exist.
 
 Verify it yourself, three ways:
 
@@ -193,7 +196,8 @@ uv run pytest -q tests/graded/test_check_01_isolation.py   # the same at the SQL
 SELECT s.name, s.visibility, u.email AS owner FROM t_northwind_labs.mcp_servers s
 JOIN platform.users u ON u.id = s.owner_id;
 -- and that the app's role cannot bypass RLS:
-SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname IN ('forge', 'forge_app');
+SELECT rolname, rolsuper, rolbypassrls, rolcanlogin FROM pg_roles
+WHERE rolname IN ('forge', 'forge_app') OR rolname LIKE 't\_%';   -- one NOLOGIN role per company
 SELECT tablename, rowsecurity, forcerowsecurity FROM pg_tables WHERE schemaname = 't_northwind_labs';
 ```
 
@@ -201,9 +205,7 @@ What is set up right now:
 
 - **Shared with everyone** (registered by the platform admin, in `platform.mcp_servers`):
   `filesystem`, `git`, `sqlite`. No credential needed; every company sees them.
-- **Shared in Northwind Labs** (Shivani, admin): `teamgit`. Priya sees it; Maven does not.
-- **Private to Priya**: `mydb`. Shivani — her own company's admin — cannot see it.
-- Nobody has connected `github` / `slack` / `jira` yet: the earlier tokens were sealed to the old
+- Nobody has registered anything privately yet. Nobody has connected `github` / `slack` / `jira` yet: the earlier tokens were sealed to the old
   key shape and were wiped with the reset. Paste them again in the Registry.
 
 ---

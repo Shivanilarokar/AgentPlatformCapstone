@@ -41,6 +41,13 @@ async def main() -> int:
 
         for schema in schemas:
             await conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+            if schema != PLATFORM_SCHEMA:  # the company's database role goes with it
+                await conn.execute(text(f"""
+                    DO $$ BEGIN
+                        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{schema}') THEN
+                            EXECUTE 'DROP OWNED BY "{schema}"'; EXECUTE 'DROP ROLE "{schema}"';
+                        END IF;
+                    END $$"""))
             print(f"  dropped {schema}")
 
     await bootstrap_platform()

@@ -101,6 +101,24 @@ async def test_a_session_with_no_person_sees_nothing():
         assert (await s.scalars(select(Agent))).all() == []
 
 
+# ------------------------------------------ the role fence under the schema
+
+
+async def test_naming_another_companys_schema_is_denied_not_answered():
+    """Even a query that schema-qualifies the other company's table is refused:
+    the request runs as that company's role, which has no USAGE elsewhere."""
+    from sqlalchemy.exc import ProgrammingError
+
+    async with tenant_session(ALPHA, ALPHA_ANNE) as s:
+        with pytest.raises(ProgrammingError, match="permission denied"):
+            await s.execute(text(f'SELECT count(*) FROM "{schema_for(BETA)}".agents'))
+
+
+async def test_a_request_runs_as_the_companys_role():
+    async with tenant_session(ALPHA, ALPHA_ANNE) as s:
+        assert await s.scalar(text("SELECT current_user")) == schema_for(ALPHA)
+
+
 # ------------------------------------------------------------- unknown ids
 
 

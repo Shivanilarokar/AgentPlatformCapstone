@@ -53,6 +53,14 @@ async def _graph(claims: Claims):
     return build_graph(await checkpointer_for(claims.tenant_key))
 
 
+def _thread(claims: Claims, public_id: str) -> str:
+    """Checkpoint rows are keyed by thread id and have no owner column, so the
+    owner is put INTO the key. A colleague who pastes my build id gets
+    "<their id>/<my suffix>" - a thread that does not exist. No ownership check
+    to forget: the wrong person cannot even name the row."""
+    return f"{claims.user_id}/{public_id}"
+
+
 def _shape(thread_id: str, result: dict[str, Any]) -> BuildOut:
     pending = result.get("__interrupt__")
     if pending:
@@ -81,7 +89,7 @@ async def start_build(body: StartIn, claims: Claims = Depends(current_user)):
     graph = await _graph(claims)
     result = await graph.ainvoke(
         {"prompt": body.prompt, "tenant": claims.tenant_key, "user": claims.user_id, "log": []},
-        config={"configurable": {"thread_id": thread_id}},
+        config={"configurable": {"thread_id": _thread(claims, thread_id)}},
     )
     return _shape(thread_id, result)
 
@@ -110,7 +118,7 @@ async def build_from_form(body: FormIn, claims: Claims = Depends(current_user)):
 
     thread_id = f"form-{uuid.uuid4().hex[:12]}"
     graph = await _graph(claims)
-    cfg = {"configurable": {"thread_id": thread_id}}
+    cfg = {"configurable": {"thread_id": _thread(claims, thread_id)}}
 
     result = await graph.ainvoke(
         {"prompt": body.prompt, "tenant": claims.tenant_key, "user": claims.user_id, "log": []}, config=cfg
@@ -141,10 +149,10 @@ async def resume_build(
     thread_id: str, body: ResumeIn, claims: Claims = Depends(current_user)
 ):
     graph = await _graph(claims)
-    cfg = {"configurable": {"thread_id": thread_id}}
+    cfg = {"configurable": {"thread_id": _thread(claims, thread_id)}}
     snapshot = await graph.aget_state(cfg)
-    if snapshot is None or not snapshot.created_at or snapshot.values.get("user") != claims.user_id:
-        raise HTTPException(404, detail=NOT_FOUND)  # a colleague's build is not mine to answer
+    if snapshot is None or not snapshot.created_at:
+        raise HTTPException(404, detail=NOT_FOUND)
 
     # The interrupt decides what a resume value looks like.
     payload: Any = body.selected if body.selected is not None else {"action": body.action}
@@ -157,13 +165,14 @@ async def resume_build(
 async def get_build(thread_id: str, claims: Claims = Depends(current_user)):
     """Reload a build that is still paused.
 
-    Reads the checkpointer for THIS tenant's schema, so a thread id belonging to
-    another company simply is not there - 404, same as any unknown id.
+    Reads the checkpointer for THIS company's schema under THIS person's key
+    prefix, so a thread id belonging to anyone else simply is not there - 404,
+    same as any unknown id.
     """
     graph = await _graph(claims)
-    snapshot = await graph.aget_state({"configurable": {"thread_id": thread_id}})
-    if snapshot is None or not snapshot.created_at or snapshot.values.get("user") != claims.user_id:
-        raise HTTPException(404, detail=NOT_FOUND)  # not mine == does not exist
+    snapshot = await graph.aget_state({"configurable": {"thread_id": _thread(claims, thread_id)}})
+    if snapshot is None or not snapshot.created_at:
+        raise HTTPException(404, detail=NOT_FOUND)
 
     pending = snapshot.tasks and snapshot.tasks[0].interrupts
     if pending:
