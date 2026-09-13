@@ -14,7 +14,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -90,3 +90,45 @@ class SharedTool(PlatformBase):
     description: Mapped[str] = mapped_column(Text, default="")
     input_schema: Mapped[dict] = mapped_column(JSONB, default=dict)
     risk: Mapped[str] = mapped_column(String(20))
+
+
+class SubmissionIndex(PlatformBase):
+    """The ONE deliberate cross-company path. The platform admin has no company,
+    so they cannot see t_<company>.submissions; this row tells them a submission
+    exists, whose it is, and which parked thread to resume. Nothing sensitive:
+    the listing here is already sanitized."""
+
+    __tablename__ = "submission_index"
+    __table_args__ = {"schema": PLATFORM_SCHEMA}
+
+    submission_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
+    tenant_key: Mapped[str] = mapped_column(String(50))
+    company: Mapped[str] = mapped_column(String(120))
+    owner_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True))
+    agent_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True))
+    thread_id: Mapped[str] = mapped_column(String(120))
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    listing: Mapped[dict] = mapped_column(JSONB, default=dict)
+    quality: Mapped[int] = mapped_column(Integer, default=0)
+    grade: Mapped[str] = mapped_column(String(1), default="D")
+    checks: Mapped[dict] = mapped_column(JSONB, default=dict)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Listing(PlatformBase):
+    """The marketplace. Global on purpose - the brief's single exception - and
+    populated by exactly one code path: an approved admin_review interrupt."""
+
+    __tablename__ = "listings"
+    __table_args__ = {"schema": PLATFORM_SCHEMA}
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    submission_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), unique=True)
+    name: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(Text, default="")
+    config: Mapped[dict] = mapped_column(JSONB, default=dict)  # the sanitized design; install copies this
+    publisher: Mapped[str] = mapped_column(String(120))        # company name only
+    quality: Mapped[int] = mapped_column(Integer, default=0)
+    grade: Mapped[str] = mapped_column(String(1), default="D")
+    installs: Mapped[int] = mapped_column(Integer, default=0)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

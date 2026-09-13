@@ -31,6 +31,8 @@ _POLICIES = {
     "agents": (f"owner_id = {_ME} OR {_SYSTEM}", f"owner_id = {_ME} OR {_SYSTEM}"),
     # what I ran is mine
     "runs": (f"owner_id = {_ME} OR {_SYSTEM}", f"owner_id = {_ME} OR {_SYSTEM}"),
+    # what I submitted is mine
+    "submissions": (f"owner_id = {_ME} OR {_SYSTEM}", f"owner_id = {_ME} OR {_SYSTEM}"),
     # my credentials are mine
     "connections": (f"owner_id = {_ME} OR {_SYSTEM}", f"owner_id = {_ME} OR {_SYSTEM}"),
     # a server I registered is mine, unless the company admin opened it to the company
@@ -111,7 +113,8 @@ async def create_tenant(tenant_key: str) -> str:
         await conn.execute(text(f'GRANT USAGE ON SCHEMA "{PLATFORM_SCHEMA}" TO "{schema}"'))
         await conn.execute(text(
             f'GRANT SELECT ON "{PLATFORM_SCHEMA}".tenants, "{PLATFORM_SCHEMA}".users, '
-            f'"{PLATFORM_SCHEMA}".mcp_servers, "{PLATFORM_SCHEMA}".mcp_tools TO "{schema}"'
+            f'"{PLATFORM_SCHEMA}".mcp_servers, "{PLATFORM_SCHEMA}".mcp_tools, '
+            f'"{PLATFORM_SCHEMA}".listings TO "{schema}"'
         ))
     return schema
 

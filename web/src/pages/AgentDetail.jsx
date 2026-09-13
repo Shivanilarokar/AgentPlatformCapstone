@@ -1,8 +1,7 @@
 /* One agent, in full.
  *
- * Six tabs, matching the mockup. Overview, Playground, Connections and Runs are
- * real; API and Settings say which step builds them rather than showing numbers
- * that are not true.
+ * Six tabs, matching the mockup. All real except API, which says which step
+ * builds it rather than showing numbers that are not true.
  *
  * The graph on Overview is DRAWN FROM THE STORED CONFIGURATION. Edit the config
  * and the picture changes - it is not a hand-maintained diagram.
@@ -14,6 +13,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ago, get } from "../api";
 import { Badge, Card, Check, Loading, Note, RiskBadge, SectionTitle, TopBar } from "../ui";
 import { PlaygroundTab, RunsTab } from "./Playground";
+import { SettingsTab } from "./Settings";
 
 const TABS = [
   ["overview", "Overview"],
@@ -322,9 +322,7 @@ export default function AgentDetail() {
             </Card>
           </NotYet>
         )}
-        {tab === "settings" && (
-          <NotYet step={9} what="Publishing to the marketplace, blocked below the score threshold with the button saying which check failed." />
-        )}
+        {tab === "settings" && <SettingsTab agent={a} onChanged={() => get(`/v1/agents/${id}`).then(setA)} />}
       </div>
     </>
   );

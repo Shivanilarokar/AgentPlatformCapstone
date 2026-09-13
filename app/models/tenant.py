@@ -75,6 +75,26 @@ class Run(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class Submission(Base):
+    """One request to publish one agent. The publish graph is parked on an
+    admin_review interrupt while status is `pending`; the admin's answer
+    resumes it. The sanitized listing is frozen here at submit time so what the
+    admin approves is exactly what goes live."""
+
+    __tablename__ = "submissions"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), server_default=CURRENT_USER)
+    agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"))
+    thread_id: Mapped[str] = mapped_column(String(120))
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending | approved | changes_requested | rejected
+    listing: Mapped[dict] = mapped_column(JSONB, default=dict)  # the sanitized projection
+    score: Mapped[dict] = mapped_column(JSONB, default=dict)    # the score at submit time
+    notes: Mapped[str] = mapped_column(Text, default="")        # the admin's words, back to the author
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class McpServer(Base):
     """A tool server this workspace has registered.
 

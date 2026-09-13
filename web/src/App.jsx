@@ -7,7 +7,8 @@ import Connections from "./pages/Connections";
 import MyAgents from "./pages/MyAgents";
 import Registry from "./pages/Registry";
 import SignIn from "./pages/SignIn";
-import Soon from "./pages/Soon";
+import AdminReview from "./pages/AdminReview";
+import Marketplace from "./pages/Marketplace";
 
 export default function App() {
   return (
@@ -22,14 +23,8 @@ export default function App() {
         <Route path="/agents/:id" element={<AgentDetail />} />
         <Route path="/connections" element={<Connections />} />
 
-        <Route path="/marketplace" element={
-          <Soon title="Marketplace" step={10}
-                sub="Agents other workspaces published and an admin approved."
-                what="Install someone else's agent design into your workspace, using your own credentials." />} />
-        <Route path="/review" element={
-          <Soon title="Admin Review" step={10}
-                sub="Nothing reaches the marketplace without a person approving it."
-                what="A queue of submissions, each one a paused run waiting for a decision." />} />
+        <Route path="/marketplace" element={<Marketplace />} />
+        <Route path="/review" element={<AdminReview />} />
 
         <Route index element={<Navigate to="/registry" replace />} />
       </Route>

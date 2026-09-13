@@ -19,8 +19,8 @@ Read `docs/ARCHITECTURE.md` first (plain language, why each decision), then `doc
 | 2 Connect to it | ✅ done | AES-256-GCM envelope encryption, per-row data key, AAD = tenant + server. No endpoint returns a secret; the UI shows dots. A test stores a sentinel token and greps every table in every schema for it. | `app/vault/envelope.py` · `app/vault/connections.py` · `app/vault/resolver.py` · `app/api/routers/connections.py` · `app/models/tenant.py` (`Connection`) · `web/src/pages/Connections.jsx` |
 | 3 Describe an agent | ✅ | Builder graph with two LangGraph interrupts (`select_tools`, `missing_connection`); survives `docker compose restart api`; form mode drives the *same* graph; the result card shows the score. | `app/builder/schema.py` (`AgentConfig`) · `app/builder/graph.py` · `app/api/routers/builds.py` · `app/tenancy/checkpointers.py` · `web/src/pages/Build.jsx` |
 | 4 Test it | ✅ except API tab | Agent page, graph from config, tools table, **Playground** (chat; a write tool pauses the run and shows Approve / Reject inline; survives an API restart; 👍/👎), **Runs** tab, **Scores** (quality 0–100 from six checks, safety A–D from five; each with its reason; `blocked_by` names why it cannot be published). **No API tab.** | `app/api/routers/runs.py` · `app/scoring/score.py` · `app/api/routers/agents.py` (`/scores`) · `web/src/pages/Playground.jsx` · `web/src/pages/AgentDetail.jsx` — pending: API tab |
-| 5 Publish it | ❌ not started | | to create: `app/publishing/graph.py`, `app/publishing/sanitize.py`, `app/api/routers/submissions.py`, `web/src/pages/AdminReview.jsx` (replaces `Soon.jsx`) |
-| 6 Someone else installs it | ❌ not started | | to create: `app/api/routers/listings.py`, `platform.listings` in `app/models/platform_.py`, `web/src/pages/Marketplace.jsx` |
+| 5 Publish it | ✅ | Settings tab: Publish is disabled below the threshold and says why; above it, the author sees exactly what will leave (allowlist projection + scrubber), then a publish graph starts and **parks on `admin_review`** in the author's company checkpoints. The platform admin's **Admin Review** queue approves / requests changes / rejects — resuming that run, across restarts. Approval is the only way into `platform.listings`. | `app/publishing/sanitize.py` · `app/publishing/graph.py` · `app/api/routers/publishing.py` · `Submission` / `SubmissionIndex` / `Listing` models · `web/src/pages/Settings.jsx` · `web/src/pages/AdminReview.jsx` |
+| 6 Someone else installs it | ⚠️ half | Marketplace lists approved designs (`GET /v1/listings`, `web/src/pages/Marketplace.jsx`). **Install not built.** | pending: install endpoint (copy the sanitized config into the installer's schema, then ask for their own connections) |
 
 Cross-cutting, already done: `app/core/db.py` + `app/api/deps.py` (tenant gate), `app/core/security.py` +
 `app/api/routers/auth.py` (sign-up / sign-in), `app/tenancy/provision.py` (schema per company),
@@ -33,15 +33,15 @@ Cross-cutting, already done: `app/core/db.py` + `app/api/deps.py` (tenant gate),
 |---|---|---|---|---|
 | 1 | User A cannot reach B's agents, even with the app filter removed | ✅ | one Postgres schema per company; `SET LOCAL search_path` per request; no `WHERE tenant_id` anywhere | `app/api/deps.py` · `app/core/db.py` · `app/tenancy/provision.py` · `tests/graded/test_check_01_isolation.py` · `tests/graded/test_no_schema_qualified_queries.py` |
 | 2 | A supplied credential appears nowhere in stored data | ✅ | envelope encryption; token never enters graph state, prompts or logs | `app/vault/envelope.py` · `app/vault/connections.py` · `app/runtime/guarded_tool.py` (`redact`) · `tests/graded/test_check_02_credentials.py` |
-| 3 | Agent with an unguarded write tool cannot be published | ✅ (at save) | `enforce_approvals()` rewrites a lying config from the registry's risk; the publish gate itself is pending | `app/builder/schema.py` · `tests/test_agent_config.py` — pending: `app/publishing/` |
-| 4 | Planted confidential material does not survive publication | ❌ | needs the publish graph + allowlist projection | to create: `app/publishing/sanitize.py` · `tests/graded/test_check_04_sanitize.py` |
+| 3 | Agent with an unguarded write tool cannot be published | ✅ | `enforce_approvals()` rewrites a lying config at save; the safety check `approvals` fails on it and `POST /publish` answers 409 naming it | `app/builder/schema.py` · `app/scoring/score.py` · `app/api/routers/publishing.py` |
+| 4 | Planted confidential material does not survive publication | ✅ | allowlist projection (`listing_from`) + scrubber for the free text (emails, links, internal hosts, IPs, paths, ticket refs, the company's name); a token cannot even enter a config | `app/publishing/sanitize.py` · `tests/graded/test_check_04_sanitize.py` |
 | 5 | Kill the server mid-build, it resumes on restart | ✅ | `interrupt()` + per-tenant `AsyncPostgresSaver` | `app/builder/graph.py` · `app/tenancy/checkpointers.py` · `app/api/routers/builds.py` · `tests/graded/test_form_and_chat_agree.py` |
-| 6 | Approval pending overnight still resumes | ❌ | same checkpointer; needs the admin-review graph | to create: `app/publishing/graph.py` · `app/api/routers/submissions.py` · `tests/graded/test_check_06_overnight.py` |
+| 6 | Approval pending overnight still resumes | ✅ | publish graph parked on `interrupt("admin_review")` in the author's company checkpoints; the admin resumes it via `platform.submission_index` | `app/publishing/graph.py` · `app/api/routers/publishing.py` · `tests/graded/test_check_06_overnight.py` (cold-restart resume) |
 | 7 | Playground runs the multi-agent demo incl. approval | ✅ | supervisor topology compiled from config; approval inside the tool wrapper; Approve / Reject in the chat | `app/runtime/compiler.py` · `app/runtime/guarded_tool.py` · `app/api/routers/runs.py` · `web/src/pages/Playground.jsx` · `tests/graded/test_check_07_runtime.py` |
 | 8 | Downloaded Postman collection gets a real response | ❌ | needs public `/v1/agents/{id}/invoke` + generated collection | to create: `app/api/routers/public.py` · `app/api/postman.py` · `tests/graded/test_check_08_postman.py` |
 | 9 | Another company's agent by id does not reveal it exists | ✅ | wrong schema → 0 rows → 404, byte-identical body | `app/api/routers/agents.py` · `app/api/deps.py` (`NOT_FOUND`) · `tests/graded/test_check_01_isolation.py` |
 
-**7 of 9 passing** (1, 2, 3, 5, 7, 9 + 7 now visible in the playground).
+**8 of 9 passing** — only 8 (Postman) remains.
 
 ### Health of the tree
 
@@ -57,8 +57,7 @@ Cross-cutting, already done: `app/core/db.py` + `app/api/deps.py` (tenant gate),
 
 | # | Build | Unlocks | Files to create / touch | Est. | Owner |
 |---|---|---|---|---|---|
-| 3 | **Publish + Admin Review** — a second graph that parks on `interrupt("admin_review")`; `platform.submission_index` so an admin can resume a run in another schema | checks 4, 6 | `app/publishing/graph.py`, `app/publishing/sanitize.py` (new) · `app/api/routers/submissions.py` (new) · `Submission`, `SubmissionIndex` models · `web/src/pages/AdminReview.jsx` · Settings tab in `AgentDetail.jsx` | 1 day | |
-| 4 | **Marketplace + install** — allowlist projection into `platform.listings`; install copies the config into the installer's schema and asks for their own connections | step 6 | `app/api/routers/listings.py` (new) · `Listing` model in `platform_.py` · `web/src/pages/Marketplace.jsx` (replaces `Soon.jsx`) | ½ day | |
+| 4 | **Install** — copy a listing's sanitized config into the installer's schema as a new agent, then walk them through connecting each `requires_connections` server with their own credentials | step 6 | `POST /v1/listings/{id}/install` in `app/api/routers/publishing.py` · `Marketplace.jsx` button | ¼ day | |
 | 5 | **Public API + Postman** — `/v1/agents/{id}/invoke`, `/stream`, `/resume`; Postman v2.1 download with the caller's own token pre-filled | check 8 | `app/api/routers/public.py`, `app/api/postman.py` (new) · `ApiToken` model in `platform_.py` · API tab in `AgentDetail.jsx` | ½ day | |
 | 6 | **Alembic** — two trees (platform, tenant template) + `migrate_all.py` | replaces `reset_db.py` | `alembic/platform/`, `alembic/tenant/` (new) · `scripts/migrate_all.py` · call from `app/tenancy/provision.py` | ½ day | |
 
@@ -343,6 +342,9 @@ uv run python scripts/inspect_db.py                                         # ev
 | | `last_used_at` | last time a tool call or health check borrowed it |
 | `t_*.agents` | `config` | the whole `AgentConfig` document (JSONB) — the agent *is* this |
 | | `quality_score` / `safety_grade` / `checks` | the last computed score and every check behind it (`app/scoring/score.py`); recomputed whenever shown |
+| `t_*.submissions` | `listing` / `score` / `notes` / `status` | the sanitized design frozen at submit time, the score then, the admin's words back, `pending`·`approved`·`changes_requested`·`rejected` |
+| `platform.submission_index` | | the one cross-company row: which company, which parked thread, the sanitized listing — what the platform admin's queue reads |
+| `platform.listings` | `config` / `publisher` | the marketplace: the sanitized design and the company **name only**; written by exactly one code path (an approved review) |
 | `t_*.runs` | `thread_id` | LangGraph thread, `<user_id>/run-…` — the owner is inside the key |
 | | `status` | `running` · `awaiting_approval` · `ok` · `rejected` · `error` |
 | | `pending` | the approval the run is parked on: tool, risk, redacted args |

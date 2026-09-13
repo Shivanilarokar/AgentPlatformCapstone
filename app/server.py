@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlalchemy import text
 
-from app.api.routers import agents, auth, builds, connections, runs, servers
+from app.api.routers import agents, auth, builds, connections, publishing, runs, servers
 from app.core.db import engine
 from app.mcp_registry import health as health_sweep
 from app.tenancy.checkpointers import close_all
@@ -32,6 +32,7 @@ app.include_router(connections.router)
 app.include_router(builds.router)
 app.include_router(agents.router)
 app.include_router(runs.router)
+app.include_router(publishing.router)
 
 
 @app.get("/health")
