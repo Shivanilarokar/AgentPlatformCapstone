@@ -156,6 +156,9 @@ function RegisterForm({ catalogue, role, onRegistered }) {
       if (e.code === "auth_required") {
         setNeedsToken(true);
         setError(`${f.name} answered but will not list its tools without a credential. Paste one and save again.`);
+      } else if (e.code === "credential_rejected") {
+        setNeedsToken(true);
+        setError(`${f.name} rejected that credential. ${e.message.split("(").pop().replace(")", "")}. ${hint}`);
       } else {
         setError(e.message);
       }

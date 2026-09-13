@@ -59,8 +59,9 @@ CATALOGUE: dict[str, ServerSpec] = {
         description="Slack's official remote MCP server: search, read channels and "
         "threads, send messages, canvases and lists.",
         auth_type="oauth",
-        credential_hint="A Slack user OAuth token (xoxp-…) from an app installed to your "
-        "workspace. Sent as Authorization: Bearer.",
+        credential_hint="A Slack USER OAuth token (xoxp-…) from an app installed to your "
+        "workspace - api.slack.com/apps → OAuth & Permissions → User OAuth Token. Bot tokens "
+        "(xoxb-…) are rejected by mcp.slack.com.",
         homepage="https://docs.slack.dev/ai/slack-mcp-server",
     ),
     "jira": ServerSpec(

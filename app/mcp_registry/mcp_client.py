@@ -98,7 +98,13 @@ class AuthRequired(Exception):
 
     GitHub, Slack and Atlassian all answer 401 to an anonymous `initialize`.
     That is not "unreachable" - it is the registry's cue to ask for a token.
+    `had_token` says whether one was sent: if so, the server REJECTED it.
     """
+
+    def __init__(self, message: str, *, had_token: bool = False, reason: str = ""):
+        super().__init__(message)
+        self.had_token = had_token
+        self.reason = reason
 
 
 @dataclass(frozen=True)
@@ -133,6 +139,7 @@ async def _probe(ep: Endpoint, token: str | None) -> None:
     headers = {"Accept": "application/json, text/event-stream"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    reason = ""
     async with httpx.AsyncClient(timeout=15, follow_redirects=True) as http:
         if ep.transport == "sse":
             async with http.stream("GET", ep.target, headers=headers) as r:
@@ -140,7 +147,17 @@ async def _probe(ep: Endpoint, token: str | None) -> None:
         else:
             r = await http.post(ep.target, json=_INITIALIZE, headers=headers)
             status = r.status_code
+            try:  # servers say why: Slack -> "invalid_token", GitHub -> plain text
+                body = r.json()
+                reason = str(body.get("error", {}).get("message") or body.get("error") or "")
+            except Exception:  # noqa: BLE001
+                reason = r.text.strip()[:80]
     if status in (401, 403):
+        if token:
+            raise AuthRequired(
+                f"{ep.target} rejected the credential ({status}{': ' + reason if reason else ''})",
+                had_token=True, reason=reason,
+            )
         raise AuthRequired(f"{ep.target} answered {status}: a credential is required")
 
 

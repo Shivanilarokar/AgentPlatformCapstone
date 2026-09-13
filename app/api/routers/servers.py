@@ -166,9 +166,10 @@ async def register_server(body: RegisterIn, claims: Claims = Depends(current_use
         except ValueError as exc:  # a malformed endpoint
             raise HTTPException(422, detail={"error": "bad_endpoint", "detail": str(exc)}) from None
         except AuthRequired as exc:
-            # Alive, but it will not list its tools anonymously. The form shows a
-            # credential field and the user tries again with one.
-            raise HTTPException(401, detail={"error": "auth_required", "detail": str(exc)}) from None
+            # Alive, but it will not list its tools anonymously - or it refused
+            # the credential it was given. The form shows which.
+            code = "credential_rejected" if exc.had_token else "auth_required"
+            raise HTTPException(401, detail={"error": code, "detail": str(exc)}) from None
         except registry.ServerUnreachable as exc:
             # Nothing was saved. A registry entry with an unverified tool list would
             # be worse than no entry at all.
