@@ -49,9 +49,10 @@ services:
     ports:
       - "5173:5173"
     volumes:
-      - ./web/src:/srv/src            # edit locally, hot reload picks it up
-      - ./web/index.html:/srv/index.html
-      - ./web/vite.config.js:/srv/vite.config.js
+      # The whole folder, not single files: on Docker Desktop for Windows a
+      # single-file bind mount goes stale when the host file is rewritten
+      # (editor save, git checkout) and Vite then fails with ENOENT.
+      - ./web:/srv                    # edit locally, hot reload picks it up
       - /srv/node_modules             # keep the container's node_modules
     depends_on:
       - api
