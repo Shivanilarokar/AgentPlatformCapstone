@@ -21,7 +21,7 @@ ENV PYTHONPATH=/srv
 COPY pyproject.toml ./
 RUN uv pip install --system --no-cache -r pyproject.toml
 
-COPY app ./app
+COPY backend/app ./app
 
 # /srv/workspace is the only directory the filesystem server may touch.
 # /srv/var holds the sqlite server's database file.

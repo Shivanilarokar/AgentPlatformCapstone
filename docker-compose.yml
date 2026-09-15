@@ -20,11 +20,11 @@ services:
       retries: 20
 
   api:
-    build: ./backend
+    build: .
     # Model provider keys and the vault master key live in .env, which is
     # gitignored. `required: false` keeps a fresh clone working without one.
     env_file:
-      - path: ./backend/.env
+      - path: .env
         required: false
     environment:
       # "db" is the service name above - Docker's DNS resolves it to that container.

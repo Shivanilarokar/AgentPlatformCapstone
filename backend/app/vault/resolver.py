@@ -1,8 +1,8 @@
 """Wiring the vault into a run.
 
 The runtime knows nothing about databases. It is handed a callable that turns a
-server name into that tenant's token, and this is the only implementation of it
-that touches the vault.
+server name into the signed-in PERSON's token, and this is the only
+implementation of it that touches the vault.
 
 One session per call, deliberately: the token exists between `use()` returning
 and `del token` in the tool wrapper, and not one moment longer.
@@ -14,7 +14,6 @@ from collections.abc import Awaitable, Callable
 
 from app.core.db import tenant_session
 from app.mcp_registry import registry
-from app.mcp_registry.catalogue import CATALOGUE
 from app.mcp_registry.mcp_client import Endpoint
 from app.vault import connections
 
@@ -46,15 +45,5 @@ def registry_endpoints(tenant_key: str, user_id: str) -> Callable[[str], Awaitab
     async def resolve(server_name: str) -> Endpoint | None:
         async with tenant_session(tenant_key, user_id) as session:
             return await registry.endpoint_for(session, server_name)
-
-    return resolve
-
-
-def catalogue_endpoints() -> Callable[[str], Awaitable[Endpoint | None]]:
-    """For scripts with no registry: the servers the platform can launch itself."""
-
-    async def resolve(server_name: str) -> Endpoint | None:
-        spec = CATALOGUE.get(server_name)
-        return spec.to_endpoint() if spec else None
 
     return resolve

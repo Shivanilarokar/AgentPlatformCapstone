@@ -1,7 +1,7 @@
 """Every value the app reads from the environment, in one typed place.
 
-By step 6 this holds the master encryption key too, so it is worth having one
-object rather than os.getenv() calls scattered around.
+Database, model providers, the JWT secret, the vault master key, the platform
+admin - one typed object rather than os.getenv() calls scattered around.
 """
 
 import os

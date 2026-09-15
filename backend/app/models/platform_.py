@@ -1,7 +1,8 @@
 """Tables in the SHARED `platform` schema.
 
 Everything here is deliberately visible across companies, and there is very
-little of it: who exists, and the marketplace. The brief calls the marketplace
+little of it: who exists, what the platform admin shared, the review index, and
+the marketplace. The brief calls the marketplace
 "the single deliberate exception - which is exactly why an admin guards it".
 
 These models DO name their schema, and that is correct: `platform` is the shared
@@ -70,7 +71,7 @@ class SharedServer(PlatformBase):
     credential_env_var: Mapped[str | None] = mapped_column(String(80), nullable=True)
     description: Mapped[str] = mapped_column(Text, default="")
     health: Mapped[str] = mapped_column(String(10), default="ok")
-    shared_by: Mapped[str] = mapped_column(String(120), default="")  # company name
+    shared_by: Mapped[str] = mapped_column(String(120), default="platform")  # only the platform admin writes here
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

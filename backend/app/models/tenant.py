@@ -102,7 +102,7 @@ class McpServer(Base):
     """A tool server this workspace has registered.
 
     `health` is maintained by introspection, never typed in: a server that stops
-    answering is marked down, and agents that depend on it show as degraded.
+    answering is marked down, and agents that depend on it fail a safety check.
     """
 
     __tablename__ = "mcp_servers"

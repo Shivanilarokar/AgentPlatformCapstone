@@ -3,8 +3,8 @@
     graph = await compile_agent(config, ctx)
 
 This is the only code in the platform that ever runs an agent. The playground
-and the public /v1 API will both call it, so there is no second path where the
-approval gate could be missing.
+(app/api/routers/runs.py) calls it; the public API will call the same function,
+so there is no second path where the approval gate could be missing.
 
 Nothing here is generated. One function reads a config document and assembles a
 graph from it - which is why the same function can safely run an agent designed

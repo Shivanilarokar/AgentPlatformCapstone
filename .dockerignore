@@ -1,6 +1,9 @@
 .venv/
 .git/
 docs/
+Frontend/
+backend/tests/
+backend/scripts/
 __pycache__/
 *.pyc
 .env

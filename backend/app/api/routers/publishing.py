@@ -286,7 +286,7 @@ async def listing(listing_id: UUID, claims: Claims = Depends(workspace_user), db
 
 @router.post("/v1/listings/{listing_id}/install", response_model=InstallOut, status_code=201)
 async def install(listing_id: UUID, claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db)):
-    """Step 6. The sanitized design becomes a brand-new agent in MY schema, owned
+    """Install. The sanitized design becomes a brand-new agent in MY schema, owned
     by me (row-level security stamps the owner). It references servers by NAME,
     so it resolves to MY connections at run time. The publisher's agent, runs
     and credentials are not touched - they are not even reachable from here."""

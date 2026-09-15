@@ -5,8 +5,8 @@
     GET  /v1/builds/{thread}         what is this build waiting for?
 
 The GET matters more than it looks: it is what makes "close the tab, restart the
-server, come back tomorrow" work. The browser holds only a thread id; the state
-lives in t_<tenant>.checkpoints.
+server, come back tomorrow" work. The browser holds only a build id; the state
+lives in t_<company>.checkpoints under "<user_id>/<build id>".
 """
 
 from __future__ import annotations

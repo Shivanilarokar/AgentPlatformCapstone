@@ -202,7 +202,7 @@ async def _connect(ep: Endpoint, token: str | None) -> AsyncIterator[ClientSessi
 
 
 async def list_tools(ep: Endpoint, token: str | None = None) -> list[DiscoveredTool]:
-    """Ask a server what it can do. This is step 1 of the brief's flow."""
+    """Ask a server what it can do - the registry's discovery call."""
     async with _connect(ep, token) as session:
         result = await session.list_tools()
         return [

@@ -11,13 +11,15 @@ it over whichever transport it speaks, and refuses to save anything it could not
 reach. There is no code path that writes an mcp_tools row from anything but a
 live tools/list response.
 
-TWO REGISTRIES, ONE VIEW
-------------------------
-    t_<tenant>.mcp_servers   private to one company
-    platform.mcp_servers     shared with every company (admin-only to create)
+TWO TABLES, ONE VIEW
+--------------------
+    t_<company>.mcp_servers  registered by a person: theirs alone (`private`),
+                             or opened to the whole company by its admin (`company`)
+    platform.mcp_servers     shared with every company - the platform admin only
 
-`list_servers()` returns the union. A private server shadows a shared one with
-the same name, so a company can override a shared entry with its own.
+`list_servers()` returns what the signed-in person can use, nearest first: a
+server they registered shadows a company one of the same name, which shadows a
+shared one. Row-level security does the per-person part; nothing here filters.
 """
 
 from __future__ import annotations

@@ -79,7 +79,7 @@ async def tenant_session(
 @asynccontextmanager
 async def platform_session() -> AsyncIterator[AsyncSession]:
     """For code that belongs to no company: sign-in, the platform admin, the
-    health sweep over shared servers, later the marketplace.
+    health sweep over shared servers, the marketplace and the review queue.
 
     Points only at the shared schema, so an unqualified tenant table name would
     simply not resolve here - there is no way to accidentally read one.

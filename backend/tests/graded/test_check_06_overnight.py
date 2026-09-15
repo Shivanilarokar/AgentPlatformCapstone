@@ -116,8 +116,9 @@ async def test_there_is_exactly_one_way_into_the_marketplace():
     import pathlib
     import re
 
+    app_dir = pathlib.Path(__file__).resolve().parents[2] / "app"
     hits = [
-        str(p) for p in pathlib.Path("app").rglob("*.py")
+        str(p.relative_to(app_dir.parent)) for p in app_dir.rglob("*.py")
         if re.search(r"(?<!class )\bListing\((?!PlatformBase)", p.read_text(encoding="utf-8"))
     ]
     assert [h.replace("\\", "/") for h in hits] == ["app/publishing/graph.py"]

@@ -3,8 +3,9 @@
 Two entry points, and the asymmetry between them is the point:
 
     add()   takes a plaintext secret, and returns nothing readable
-    use()   returns a plaintext secret, and is called from exactly one place
-            (app/runtime/guarded_tool.py), inside a try/finally that drops it
+    use()   returns a plaintext secret, for one call, to callers that drop it
+            immediately: the tool wrapper (app/runtime/guarded_tool.py), the
+            registry re-check, and the health sweep
 
 There is deliberately no `get_secret()`. No endpoint returns one. If you find
 yourself wanting one, the answer is that the tool call should move to where the

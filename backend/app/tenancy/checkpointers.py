@@ -10,7 +10,8 @@ arguments sit.
 Row-level security cannot help: there is no column to write a policy against.
 Putting each company's checkpoint tables inside its own schema does, because a
 connection whose `search_path` is t_northwind_labs simply cannot see
-t_helios.checkpoints.
+t_maven.checkpoints. Within a company, the owner is written INTO the thread id
+("<user_id>/build-...") by the routers, so a colleague cannot even name a row.
 
 So every connection this pool hands out is opened with
 `options=-c search_path=t_<tenant>`, and `setup()` therefore creates the

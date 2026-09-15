@@ -14,8 +14,8 @@ from sqlalchemy import select, text
 from app.core.config import settings
 from app.core.db import engine, platform_session
 from app.core.security import hash_password
-from app.models import tenant as _tenant_models  # noqa: F401 - registers the tables on Base
 from app.models.base import Base
+from app.models.tenant import Agent  # noqa: F401 - importing the module registers every company table on Base
 from app.models.platform_ import PLATFORM_SCHEMA, PlatformBase, User
 from app.tenancy.schema_names import schema_for
 
@@ -49,7 +49,7 @@ _POLICIES = {
 
 
 async def bootstrap_platform() -> None:
-    """The shared schema: tenants, users, shared servers, later the marketplace."""
+    """The shared schema: tenants, users, shared servers, the review index, the marketplace."""
     async with engine.begin() as conn:
         await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{PLATFORM_SCHEMA}"'))
         await conn.run_sync(PlatformBase.metadata.create_all)

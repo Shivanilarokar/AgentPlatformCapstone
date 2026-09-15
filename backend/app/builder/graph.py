@@ -10,9 +10,9 @@ The brief on those two stops:
      project. They are LangGraph interrupts, and the build must survive a server
      restart while it is paused and pick up exactly where it left off."
 
-They survive a restart because the graph is compiled with the per-tenant
+They survive a restart because the graph is compiled with the per-company
 AsyncPostgresSaver. While paused, nothing is running - the build is a row in
-t_<tenant>.checkpoints.
+t_<company>.checkpoints, under a thread id that names its owner.
 """
 
 from __future__ import annotations

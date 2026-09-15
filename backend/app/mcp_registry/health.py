@@ -4,9 +4,10 @@ Requirement 4 of the MCP Registry screen:
 
     "A scheduled job re-checks every server and marks the dead ones."
 
-Every HEALTH_INTERVAL_SECONDS this walks every company's schema and every shared
-server, re-runs tools/list against each, and flips status to "down" for any that
-stopped answering. Agents depending on a down server show as degraded.
+Every HEALTH_INTERVAL_SECONDS this walks every shared server and every person's
+servers in every company's schema, re-runs tools/list against each, and flips
+`health` to "down" for any that stopped answering. Agents depending on a down
+server fail the "servers healthy" safety check.
 
 It is a plain asyncio task started with the app. No Celery, no Redis, no cron -
 one loop is exactly enough for this, and it is one fewer container for a grader
