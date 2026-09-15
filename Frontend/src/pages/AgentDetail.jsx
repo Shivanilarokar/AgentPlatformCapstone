@@ -10,8 +10,9 @@
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 
-import { ago, get } from "../api";
+import { ago, del, get } from "../api";
 import { Badge, Card, Check, Loading, Note, RiskBadge, SectionTitle, TopBar } from "../ui";
+import { ApiTab } from "./ApiTab";
 import { PlaygroundTab, RunsTab } from "./Playground";
 import { SettingsTab } from "./Settings";
 
@@ -164,6 +165,18 @@ function Overview({ a }) {
           the picture changes.
         </p>
 
+        <SectionTitle>Instructions</SectionTitle>
+        <Card className="muted" style={{ fontSize: 13 }}>
+          {cfg.topology.type === "supervisor" ? (
+            <>
+              <div><b>Coordinator:</b> {cfg.topology.supervisor?.instructions}</div>
+              {cfg.topology.specialists.map((sp) => (
+                <div key={sp.name} style={{ marginTop: 6 }}><b>{sp.name}:</b> {sp.instructions}</div>
+              ))}
+            </>
+          ) : (cfg.topology.supervisor?.instructions || cfg.description)}
+        </Card>
+
         <SectionTitle>Tools</SectionTitle>
         <Card style={{ padding: 0 }}>
           <table className="t">
@@ -221,8 +234,18 @@ function Overview({ a }) {
 
 function ConnectionsTab({ a }) {
   const [servers, setServers] = useState(null);
-  useEffect(() => { get("/v1/servers").then(setServers).catch(() => setServers([])); }, []);
+  const [conns, setConns] = useState([]);
+  const load = () => Promise.all([
+    get("/v1/servers").then(setServers).catch(() => setServers([])),
+    get("/v1/connections").then(setConns).catch(() => setConns([])),
+  ]);
+  useEffect(() => { load(); }, []);
   const byName = Object.fromEntries((servers ?? []).map((s) => [s.name, s]));
+  const connByName = Object.fromEntries(conns.map((c) => [c.server_name, c]));
+  async function revoke(name) {
+    await del(`/v1/connections/${name}`);
+    await load();
+  }
   const status = (name) => {
     const s = byName[name];
     if (!servers) return ["", "…"];
@@ -244,7 +267,7 @@ function ConnectionsTab({ a }) {
       )}
       <Card style={{ padding: 0, maxWidth: 820 }}>
         <table className="t">
-          <thead><tr><th>Server</th><th>Status</th><th>Used by this agent</th><th></th></tr></thead>
+          <thead><tr><th>Server</th><th>Status</th><th>Used by this agent</th><th>Last used</th><th></th></tr></thead>
           <tbody>
             {a.config.requires_connections.map((name) => {
               const [tone, label] = status(name);
@@ -256,9 +279,11 @@ function ConnectionsTab({ a }) {
                     {a.config.tools.filter((t) => t.requires_connection === name)
                       .map((t) => t.ref.split(".")[1]).join(", ")}
                   </td>
+                  <td className="muted">{connByName[name]?.last_used_at ? ago(connByName[name].last_used_at) : "—"}</td>
                   <td>
                     {tone === "warn" && <Link className="btn primary sm" to={`/connections?add=${name}`}>Connect</Link>}
                     {tone === "danger" && !byName[name] && <Link className="btn sm" to="/registry">Register</Link>}
+                    {tone === "ok" && connByName[name]?.status === "active" && <button className="btn sm" onClick={() => revoke(name)}>Revoke</button>}
                   </td>
                 </tr>
               );
@@ -312,7 +337,10 @@ export default function AgentDetail() {
       <TopBar
         title={<span className="row" style={{ gap: 9 }}>{a.name} <Badge dot>{a.status}</Badge></span>}
         sub={a.description}
-        actions={<Link className="btn" to="/agents">← My Agents</Link>}
+        actions={<>
+          <Link className="btn" to="/agents">← My Agents</Link>
+          <Link className="btn primary" to={`/agents/${a.id}?tab=playground`} style={{ marginLeft: 6 }}>Open playground</Link>
+        </>}
       />
 
       <div className="tabs">
@@ -329,18 +357,7 @@ export default function AgentDetail() {
         {tab === "connections" && <ConnectionsTab a={a} />}
         {tab === "playground" && <PlaygroundTab agent={a} />}
         {tab === "runs" && <RunsTab agent={a} />}
-        {tab === "api" && (
-          <NotYet step={11} what="A callable URL for this agent, plus a Download Postman Collection button that produces a collection you can Send from immediately.">
-            <Card style={{ marginTop: 14 }}>
-              <div className="mono" style={{ fontSize: 12.5 }}>POST /v1/agents/{a.id}/invoke</div>
-              <hr className="sep" />
-              <div className="faint" style={{ fontSize: 12 }}>
-                A token belonging to another workspace that calls this URL will get <b>404</b>,
-                not 403 — that part is already true, because the row is not in their schema.
-              </div>
-            </Card>
-          </NotYet>
-        )}
+        {tab === "api" && <ApiTab agent={a} />}
         {tab === "settings" && <SettingsTab agent={a} onChanged={() => get(`/v1/agents/${id}`).then(setA)} />}
       </div>
     </>

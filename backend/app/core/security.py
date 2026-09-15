@@ -85,3 +85,50 @@ def read_token(token: str) -> Claims:
         name=data["name"],
         role=data["role"],
     )
+
+
+# ------------------------------------------------------------------ API tokens
+
+API_TOKEN_PREFIX = "forge_"
+
+
+def new_api_token() -> tuple[str, str, str]:
+    """(plaintext, sha256 hex, display prefix). The plaintext is shown once."""
+    import hashlib
+    import secrets
+
+    plain = API_TOKEN_PREFIX + secrets.token_urlsafe(32)
+    return plain, hashlib.sha256(plain.encode()).hexdigest(), plain[:10]
+
+
+def hash_api_token(plain: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(plain.encode()).hexdigest()
+
+
+async def claims_for_api_token(plain: str) -> Claims | None:
+    """Resolve a `forge_...` token to the person it belongs to, or None."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from app.core.db import platform_session
+    from app.models.platform_ import ApiToken, Tenant, User
+
+    async with platform_session() as s:
+        row = await s.scalar(select(ApiToken).where(
+            ApiToken.token_hash == hash_api_token(plain), ApiToken.revoked_at.is_(None)))
+        if row is None:
+            return None
+        user = await s.get(User, row.user_id)
+        if user is None:
+            return None
+        tenant = await s.get(Tenant, user.tenant_id) if user.tenant_id else None
+        row.last_used_at = datetime.now(timezone.utc)
+        return Claims(
+            user_id=str(user.id),
+            tenant_id=str(tenant.id) if tenant else None,
+            tenant_key=tenant.schema_key if tenant else None,
+            email=user.email, name=user.name, role=user.role,
+        )

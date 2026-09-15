@@ -8,9 +8,10 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { ago, get, post } from "../api";
-import { Badge, Card, Note, SectionTitle } from "../ui";
+import { Badge, Card, Check, Note, SectionTitle } from "../ui";
 
 const STATUS_TONE = { ok: "ok", awaiting_approval: "warn", rejected: "", error: "danger", running: "" };
 const STATUS_LABEL = { ok: "ok", awaiting_approval: "approval", rejected: "rejected", error: "error", running: "running" };
@@ -66,6 +67,50 @@ function Approval({ run, onDecide, busy }) {
   );
 }
 
+/* --------------------------------------------------- before a run: readiness */
+
+const CONN_LABEL = {
+  connected: ["ok", "connected"],
+  no_credential_needed: ["ok", "no credential needed"],
+  needs_credential: ["danger", "not connected"],
+  not_registered: ["danger", "not in your registry"],
+};
+
+function NeedsConnection({ readiness, onRecheck, onRunAnyway }) {
+  return (
+    <div className="interrupt">
+      <div className="ihead">
+        <span>Before it runs · check connections</span>
+        <span>{readiness.missing.length} missing</span>
+      </div>
+      <div className="ibody">
+        <p style={{ marginTop: 0 }}>This agent uses servers you are not connected to yet:</p>
+        {Object.entries(readiness.connections).map(([name, st]) => {
+          const [tone, label] = CONN_LABEL[st];
+          return (
+            <div className="row" style={{ gap: 10, padding: "5px 0" }} key={name}>
+              <Badge tone={tone} dot>{label}</Badge><b>{name}</b>
+            </div>
+          );
+        })}
+        <hr className="sep" style={{ margin: "8px 0 12px" }} />
+        <p className="muted" style={{ margin: "0 0 10px", fontSize: 12.5 }}>
+          Add your own credential and it is encrypted immediately. It is never written into the agent.
+        </p>
+        <div className="row wrap">
+          {readiness.missing.map((n) => (
+            readiness.connections[n] === "not_registered"
+              ? <Link key={n} className="btn primary sm" to="/registry">Register {n}</Link>
+              : <Link key={n} className="btn primary sm" to={`/connections?add=${n}`}>Connect {n}</Link>
+          ))}
+          <button className="btn sm" onClick={onRecheck}>I have connected it</button>
+          <button className="btn sm" onClick={onRunAnyway}>Run anyway (degraded)</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------- playground */
 
 export function PlaygroundTab({ agent }) {
@@ -74,7 +119,16 @@ export function PlaygroundTab({ agent }) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [readiness, setReadiness] = useState(null);
+  const [gate, setGate] = useState(null);      // the readiness card, when a run was refused
+  const [pendingInput, setPendingInput] = useState("");
   const bottom = useRef(null);
+
+  const checkReady = useCallback(async () => {
+    const r = await get(`/v1/agents/${agent.id}/readiness`);
+    setReadiness(r);
+    return r;
+  }, [agent.id]);
 
   const load = useCallback(async () => {
     const rows = await get(`/v1/agents/${agent.id}/runs`);
@@ -84,13 +138,21 @@ export function PlaygroundTab({ agent }) {
     setCurrent((cur) => waiting ?? (cur ? rows.find((r) => r.id === cur.id) ?? cur : rows[0] ?? null));
   }, [agent.id]);
 
-  useEffect(() => { load().catch((e) => setError(e.message)); }, [load]);
+  useEffect(() => { load().catch((e) => setError(e.message)); checkReady().catch(() => {}); }, [load, checkReady]);
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [current, busy]);
 
-  async function send() {
-    if (!input.trim()) return;
-    setBusy(true); setError(null);
-    const text = input; setInput("");
+  async function send(force = false) {
+    const text = (force ? pendingInput : input).trim();
+    if (!text) return;
+    setError(null);
+    // Check connections FIRST. A missing credential is asked for, not run into.
+    if (!force) {
+      const r = await checkReady().catch(() => null);
+      if (r && !r.ready) { setGate(r); setPendingInput(text); return; }
+    }
+    setGate(null);
+    setBusy(true);
+    setInput("");
     setCurrent({ id: "pending", input: text, status: "running", transcript: [], pending: null, output: "" });
     try {
       const r = await post(`/v1/agents/${agent.id}/invoke`, { input: text });
@@ -160,6 +222,15 @@ export function PlaygroundTab({ agent }) {
               </div></div>
           )}
 
+          {gate && (
+            <div className="msg bot"><div className="who-av">F</div>
+              <div className="body" style={{ width: "100%" }}>
+                <NeedsConnection readiness={gate}
+                  onRecheck={async () => { const r = await checkReady(); if (r.ready) { setGate(null); send(true); } else setGate(r); }}
+                  onRunAnyway={() => send(true)} />
+              </div></div>
+          )}
+
           {error && <div className="note warn">{error}</div>}
           <div ref={bottom} />
         </div>
@@ -168,7 +239,7 @@ export function PlaygroundTab({ agent }) {
           <input value={input} onChange={(e) => setInput(e.target.value)}
                  onKeyDown={(e) => e.key === "Enter" && !busy && send()}
                  placeholder={`Ask ${agent.name} to do something…`} disabled={busy} />
-          <button className="btn primary sm" onClick={send} disabled={busy || !input.trim()}>
+          <button className="btn primary sm" onClick={() => send()} disabled={busy || !input.trim()}>
             {busy ? "Running…" : "Send"}
           </button>
         </div>
@@ -195,6 +266,18 @@ export function PlaygroundTab({ agent }) {
             </>
           ) : <div className="muted" style={{ fontSize: 13 }}>No run yet.</div>}
         </Card>
+
+        {readiness && (
+          <>
+            <SectionTitle>Connections</SectionTitle>
+            <Card>
+              {Object.entries(readiness.connections).map(([name, st]) => (
+                <Check key={name} ok={CONN_LABEL[st][0] === "ok"}><b>{name}</b> <span className="muted">— {CONN_LABEL[st][1]}</span></Check>
+              ))}
+              {readiness.connections && Object.keys(readiness.connections).length === 0 && <span className="muted">needs none</span>}
+            </Card>
+          </>
+        )}
 
         {r && r.status === "awaiting_approval" && (
           <Note style={{ marginTop: 16, fontSize: 12.2 }}>

@@ -20,7 +20,7 @@ from sqlalchemy.exc import DataError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import platform_session, tenant_session
-from app.core.security import Claims, read_token
+from app.core.security import API_TOKEN_PREFIX, Claims, claims_for_api_token, read_token
 
 #: auto_error=False so we can also accept the cookie the browser UI sets.
 bearer = HTTPBearer(auto_error=False)
@@ -28,13 +28,20 @@ bearer = HTTPBearer(auto_error=False)
 NOT_FOUND = {"error": "not_found"}  # one body, used for every miss (check 9)
 
 
-def current_user(
+async def current_user(
     request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(bearer),
 ) -> Claims:
+    """Who is calling: the browser's cookie (a JWT), a JWT as Bearer, or an API
+    token as Bearer (`forge_...`) - the way Postman and scripts call agents."""
     token = creds.credentials if creds else request.cookies.get("forge_token")
     if not token:
         raise HTTPException(401, detail={"error": "not_signed_in"})
+    if token.startswith(API_TOKEN_PREFIX):
+        claims = await claims_for_api_token(token)
+        if claims is None:
+            raise HTTPException(401, detail={"error": "bad_token"})
+        return claims
     try:
         return read_token(token)
     except jwt.PyJWTError:

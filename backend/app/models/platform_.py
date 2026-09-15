@@ -133,3 +133,24 @@ class Listing(PlatformBase):
     grade: Mapped[str] = mapped_column(String(1), default="D")
     installs: Mapped[int] = mapped_column(Integer, default=0)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ApiToken(PlatformBase):
+    """A long-lived credential for calling agents from OUTSIDE the UI (Rule 7).
+
+    Only a hash is stored; the plaintext is shown once, at creation. The token
+    resolves to a person, so a call with it is that person's call: their
+    company's schema, their rows, their connections. Another company's token
+    asking for this agent finds nothing - 404, never 403."""
+
+    __tablename__ = "api_tokens"
+    __table_args__ = {"schema": PLATFORM_SCHEMA}
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey(f"{PLATFORM_SCHEMA}.users.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(120), default="")
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)  # sha256 hex
+    prefix: Mapped[str] = mapped_column(String(12))  # "forge_ab12" - what the list shows
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

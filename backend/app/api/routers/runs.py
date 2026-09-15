@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -133,11 +133,13 @@ def _state(run: Run) -> dict:
 
 @router.post("/invoke", response_model=RunOut, status_code=202)
 async def invoke(
-    agent_id: UUID, body: InvokeIn,
+    agent_id: UUID, body: InvokeIn, request: Request,
     claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db),
 ):
     agent = await _agent(db, agent_id)
-    run = Run(agent_id=agent.id, input=body.input, trigger="playground",
+    # a browser session is the playground; a `forge_` API token is the public API
+    trigger = "api" if (request.headers.get("authorization") or "").startswith("Bearer forge_") else "playground"
+    run = Run(agent_id=agent.id, input=body.input, trigger=trigger,
               thread_id=f"{claims.user_id}/run-{uuid.uuid4().hex[:12]}")
     db.add(run)
     await db.flush()
