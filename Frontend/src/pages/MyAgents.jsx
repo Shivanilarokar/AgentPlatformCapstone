@@ -25,9 +25,13 @@ function AgentCard({ a }) {
       </div>
       <div className="foot">
         <div className="scores">
-          <span className="score" title="Does it work? 0-100">{a.quality_score ?? "—"}</span>
-          <span className="score" title="Is it safe? A-D">{a.safety_grade ?? "—"}</span>
-          <span className="score">{a.runs} run{a.runs === 1 ? "" : "s"}</span>
+          {a.runs > 0
+            ? <>
+                <span className="score" title="Does it work? 0-100">{a.quality_score}</span>
+                <span className="score" title="Is it safe? A-D">{a.safety_grade}</span>
+                <span className="score">{a.runs} run{a.runs === 1 ? "" : "s"}</span>
+              </>
+            : <span className="score muted" title="Scores start with the first run">not run yet</span>}
         </div>
         <div>{a.last_run_at ? `last ${ago(a.last_run_at)}` : a.guarded.length ? `${a.guarded.length} need approval` : "read-only"}</div>
       </div>

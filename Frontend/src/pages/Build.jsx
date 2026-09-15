@@ -47,11 +47,15 @@ function Steps({ at }) {
 
 function SelectTools({ payload, onAnswer, busy }) {
   const [picked, setPicked] = useState(new Set(payload.suggested ?? []));
+  const [showAll, setShowAll] = useState(false);
 
-  const byServer = payload.catalogue.reduce((acc, t) => {
+  const suggested = new Set(payload.suggested ?? []);
+  const shown = payload.catalogue.filter((t) => showAll || suggested.has(t.ref) || picked.has(t.ref));
+  const byServer = shown.reduce((acc, t) => {
     (acc[t.server] ??= []).push(t);
     return acc;
   }, {});
+  const hidden = payload.catalogue.length - shown.length;
 
   const toggle = (ref) => {
     const next = new Set(picked);
@@ -67,7 +71,15 @@ function SelectTools({ payload, onAnswer, busy }) {
       </div>
       <div className="ibody">
         <p style={{ marginTop: 0 }}>
-          I searched your registry. These tools cover it — tick the ones you want.
+          <b>{payload.name}</b> — {payload.description}
+        </p>
+        <p className="muted" style={{ fontSize: 12.5 }}>
+          {payload.specialists?.length >= 2
+            ? <>Shape: <b>coordinator + {payload.specialists.map((x) => x.name).join(", ")}</b> — {payload.reasoning}</>
+            : <>Shape: <b>single agent</b> — {payload.reasoning}</>}
+        </p>
+        <p className="muted" style={{ fontSize: 12.5 }}>
+          These are the tools it needs. Untick any you do not want; add others from the full list.
         </p>
 
         {Object.entries(byServer).map(([server, tools]) => (
@@ -84,6 +96,7 @@ function SelectTools({ payload, onAnswer, busy }) {
                 <div>
                   <div className="t">
                     <span className="mono">{t.ref}</span> <RiskBadge risk={t.risk} />
+                    {suggested.has(t.ref) && <Badge tone="accent">suggested</Badge>}
                   </div>
                   <div className="d">{t.description || "—"}</div>
                 </div>
@@ -91,6 +104,15 @@ function SelectTools({ payload, onAnswer, busy }) {
             ))}
           </div>
         ))}
+
+        {hidden > 0 && (
+          <button className="linkish" onClick={() => setShowAll(true)}>
+            + show all {payload.catalogue.length} tools in your registry
+          </button>
+        )}
+        {showAll && payload.catalogue.length > shown.length - 1 && (
+          <button className="linkish" onClick={() => setShowAll(false)}>show only the suggested ones</button>
+        )}
 
         <div className="row" style={{ marginTop: 12 }}>
           <button className="btn primary sm" disabled={busy || picked.size === 0}
@@ -276,6 +298,10 @@ export default function Build() {
                         {state.config?.description}
                       </div>
                       <dl className="kv" style={{ gridTemplateColumns: "118px 1fr", fontSize: 12.5 }}>
+                        <dt>Shape</dt>
+                        <dd>{state.config?.topology.type === "supervisor"
+                          ? `coordinator + ${state.config.topology.specialists.map((x) => x.name).join(", ")}`
+                          : "single agent"}</dd>
                         <dt>Tools</dt>
                         <dd>{state.config?.tools.map((t) => (
                           <span className="chip" key={t.ref}>{t.ref}</span>

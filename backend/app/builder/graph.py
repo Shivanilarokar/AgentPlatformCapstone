@@ -17,6 +17,8 @@ t_<company>.checkpoints, under a thread id that names its owner.
 
 from __future__ import annotations
 
+import re
+
 import logging
 import operator
 from typing import Annotated, Any, Literal, TypedDict
@@ -41,6 +43,8 @@ from app.runtime.models import chat_model
 
 log = logging.getLogger(__name__)
 
+DESIGN_RULES = "You design agents for a platform. Given a request and the tools this workspace actually has, choose the SMALLEST set of tools that does the job - usually 1 to 3. Rules:\n- Use ONLY refs from the list, exactly as written.\n- Never include a tool for something the request did not ask for. 'Summarise issues' needs a list tool, not a create tool.\n- Prefer the most specific tool: read_text_file over read_file or read_media_file; list_issues over search_issues for 'my open issues'.\n- Include a write tool only if the request asks for something to be created, written, sent or posted.\n- If the job has distinct phases (gather, then act), split it into 2-3 specialists, each with only the tools for its phase, and write how the coordinator sequences them. A single-phase job gets no specialists and plain instructions instead.\n- Instructions are what the agent will be told at run time: concrete, second person, no tool names."
+
 DEFAULT_MODEL = ModelSpec(provider="google_genai", name="gemini-flash-lite-latest", temperature=0)
 
 
@@ -60,6 +64,9 @@ class BuildState(TypedDict, total=False):
     description: str
     reasoning: str
     suggested: list[str]  # tool refs the model proposed
+    instructions: str  # for a single agent
+    supervisor_instructions: str  # for a coordinator
+    specialists: list[dict]  # [{name, instructions, tool_refs}] when the job splits
 
     # from search_registry()
     catalogue: list[dict]  # every tool this workspace has, for the picker
@@ -81,6 +88,12 @@ class BuildState(TypedDict, total=False):
 # --------------------------------------------------------------- what the model returns
 
 
+class SpecialistDraft(BaseModel):
+    name: str = Field(description="short lowercase identifier, e.g. 'triager'")
+    instructions: str = Field(description="One or two sentences: this worker's job")
+    tool_refs: list[str] = Field(default_factory=list, description="the subset of tool refs this worker needs")
+
+
 class Draft(BaseModel):
     """The shape we force the model into. No free-form parsing."""
 
@@ -89,11 +102,18 @@ class Draft(BaseModel):
     reasoning: str = Field(description="One sentence: why these tools")
     tool_refs: list[str] = Field(
         default_factory=list,
-        description="Tool refs to use, each exactly 'server.tool' from the list given",
+        description="The MINIMUM set of tool refs, each exactly 'server.tool' from the list given",
     )
-    specialists: list[str] = Field(
+    instructions: str = Field(
+        default="", description="Instructions for the agent itself, if it does the whole job alone"
+    )
+    supervisor_instructions: str = Field(
+        default="", description="If split into specialists: how the coordinator sequences them"
+    )
+    specialists: list[SpecialistDraft] = Field(
         default_factory=list,
-        description="2 short lowercase worker names if the job splits in two, else empty",
+        description="Split the job into 2-3 specialists ONLY when it has distinct phases "
+        "(e.g. gather information, then act on it). Otherwise leave empty.",
     )
 
 
@@ -132,27 +152,43 @@ async def understand(state: BuildState) -> dict:
     llm = chat_model(DEFAULT_MODEL).with_structured_output(Draft)
     draft: Draft = await llm.ainvoke(
         [
-            SystemMessage(
-                "You design agents for a platform. Given a request and the tools this "
-                "workspace actually has, choose the smallest set of tools that does the "
-                "job. Use ONLY refs from the list. Prefer read tools; include a write "
-                "tool only if the request asks for something to be created or sent."
-            ),
+            SystemMessage(DESIGN_RULES),
             HumanMessage(f"Request:\n{state['prompt']}\n\nTools available:\n{listing}"),
         ]
     )
 
     valid = {c["ref"] for c in catalogue}
     suggested = [r for r in draft.tool_refs if r in valid]
+    specialists = [
+        {"name": _ident(sp.name), "instructions": sp.instructions,
+         "tool_refs": [r for r in sp.tool_refs if r in valid]}
+        for sp in draft.specialists
+    ]
+    # every specialist tool is part of the suggestion; nothing hides behind a worker
+    for sp in specialists:
+        suggested += [r for r in sp["tool_refs"] if r not in suggested]
+    if len(specialists) < 2:
+        specialists = []
 
+    shape = (f"coordinator + {', '.join(sp['name'] for sp in specialists)}"
+             if specialists else "single agent")
     return {
         "catalogue": catalogue,
         "name": draft.name,
         "description": draft.description,
         "reasoning": draft.reasoning,
         "suggested": suggested,
-        "log": [f"Understood: {draft.name}. {draft.reasoning}"],
+        "instructions": draft.instructions,
+        "supervisor_instructions": draft.supervisor_instructions,
+        "specialists": specialists,
+        "log": [f"Understood: {draft.name} - {shape}. {draft.reasoning}"],
     }
+
+
+def _ident(name: str) -> str:
+    """'Issue Triager' -> 'issue_triager': the identifier shape the config allows."""
+    out = re.sub(r"[^a-z0-9_]+", "_", name.strip().lower()).strip("_")
+    return out if out and out[0].isalpha() else f"w_{out or 'worker'}"
 
 
 def search_registry(state: BuildState) -> Command[Literal["check_connections", "__end__"]]:
@@ -170,6 +206,7 @@ def search_registry(state: BuildState) -> Command[Literal["check_connections", "
             "description": state.get("description", ""),
             "reasoning": state.get("reasoning", ""),
             "suggested": state.get("suggested", []),
+            "specialists": state.get("specialists", []),
             "catalogue": state["catalogue"],
         }
     )
@@ -283,7 +320,7 @@ async def assemble(state: BuildState) -> dict:
         "name": state.get("name") or "Untitled agent",
         "description": state.get("description") or state["prompt"][:200],
         "model": DEFAULT_MODEL.model_dump(),
-        "topology": {"type": "single", "supervisor": None, "specialists": []},
+        "topology": _topology(state, [t["ref"] for t in tools]),
         "tools": tools,
         "policy": {"approval_required_for": ["write", "destructive"], "max_tool_calls": 25},
         "requires_connections": sorted({t["requires_connection"] for t in tools}),
@@ -300,6 +337,40 @@ async def assemble(state: BuildState) -> dict:
             f"Built {validated.name} with {len(validated.tools)} tools."
             + (f" {', '.join(guarded)} will ask before running." if guarded else "")
         ],
+    }
+
+
+def _topology(state: BuildState, granted: list[str]) -> dict:
+    """Coordinator + specialists when the design split the job, else one agent.
+
+    A specialist keeps only the tools the user actually granted; a selected
+    tool no specialist claimed goes to the first one so nothing is lost. If
+    fewer than two specialists survive, the shape collapses to a single agent.
+    """
+    specs = []
+    claimed: set[str] = set()
+    for sp in state.get("specialists", []):
+        tools = [r for r in sp["tool_refs"] if r in granted]
+        specs.append({"name": sp["name"], "instructions": sp["instructions"], "tools": tools})
+        claimed.update(tools)
+    if len(specs) >= 2:
+        specs[0]["tools"] += [r for r in granted if r not in claimed]
+        return {
+            "type": "supervisor",
+            "supervisor": {
+                "instructions": state.get("supervisor_instructions")
+                or "Send the work to each specialist in order, passing on what the previous one found.",
+                "delegates_to": [sp["name"] for sp in specs],
+            },
+            "specialists": specs,
+        }
+    return {
+        "type": "single",
+        "supervisor": {
+            "instructions": state.get("instructions") or state.get("description", ""),
+            "delegates_to": [],
+        },
+        "specialists": [],
     }
 
 
