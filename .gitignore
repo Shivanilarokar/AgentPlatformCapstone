@@ -13,8 +13,8 @@ wheels/
 var/
 
 # Frontend
-web/node_modules/
-web/dist/
+Frontend/node_modules/
+Frontend/dist/
 
 # Editors / scratch
 .vscode/

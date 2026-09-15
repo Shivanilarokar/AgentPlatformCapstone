@@ -15,16 +15,16 @@ Read `docs/ARCHITECTURE.md` first (plain language, why each decision), then `doc
 
 | Step | Status | What exists today | Files |
 |---|---|---|---|
-| 1 Register a tool server | ✅ done | Form: name, transport (stdio / http / sse), endpoint, auth type, shared or private. The platform connects out and calls `tools/list` — no tool is typed by hand. Read / write / destructive marking. Health job every 5 min marks dead servers `down`. Sharing with everyone = company admins only. | `app/api/routers/servers.py` · `app/mcp_registry/registry.py` · `app/mcp_registry/catalogue.py` · `app/mcp_registry/health.py` · `app/mcp_registry/client.py` (transports + `classify_risk`) · `app/models/tenant.py` (`McpServer`, `McpTool`) · `app/models/platform_.py` (`SharedServer`, `SharedTool`) · `web/src/pages/Registry.jsx` |
-| 2 Connect to it | ✅ done | AES-256-GCM envelope encryption, per-row data key, AAD = tenant + server. No endpoint returns a secret; the UI shows dots. A test stores a sentinel token and greps every table in every schema for it. | `app/vault/envelope.py` · `app/vault/connections.py` · `app/vault/resolver.py` · `app/api/routers/connections.py` · `app/models/tenant.py` (`Connection`) · `web/src/pages/Connections.jsx` |
-| 3 Describe an agent | ✅ | Builder graph with two LangGraph interrupts (`select_tools`, `missing_connection`); survives `docker compose restart api`; form mode drives the *same* graph; the result card shows the score. | `app/builder/schema.py` (`AgentConfig`) · `app/builder/graph.py` · `app/api/routers/builds.py` · `app/tenancy/checkpointers.py` · `web/src/pages/Build.jsx` |
-| 4 Test it | ✅ except API tab | Agent page, graph from config, tools table, **Playground** (chat; a write tool pauses the run and shows Approve / Reject inline; survives an API restart; 👍/👎), **Runs** tab, **Scores** (quality 0–100 from six checks, safety A–D from five; each with its reason; `blocked_by` names why it cannot be published). **No API tab.** | `app/api/routers/runs.py` · `app/scoring/score.py` · `app/api/routers/agents.py` (`/scores`) · `web/src/pages/Playground.jsx` · `web/src/pages/AgentDetail.jsx` — pending: API tab |
-| 5 Publish it | ✅ | Settings tab: Publish is disabled below the threshold and says why; above it, the author sees exactly what will leave (allowlist projection + scrubber), then a publish graph starts and **parks on `admin_review`** in the author's company checkpoints. The platform admin's **Admin Review** queue approves / requests changes / rejects — resuming that run, across restarts. Approval is the only way into `platform.listings`. | `app/publishing/sanitize.py` · `app/publishing/graph.py` · `app/api/routers/publishing.py` · `Submission` / `SubmissionIndex` / `Listing` models · `web/src/pages/Settings.jsx` · `web/src/pages/AdminReview.jsx` |
-| 6 Someone else installs it | ✅ | Marketplace lists approved designs; a listing page shows what it needs from *you* (connected / needs credential / no credential); **Add to my workspace** copies the sanitized design into the installer's schema as their own agent (`installed_from` set, `installs` counted) and lands on its Connections tab to connect their own credentials. The publisher's agent, runs and tokens are untouched and unreachable. | `app/api/routers/publishing.py` (`/v1/listings/{id}`, `/install`) · `web/src/pages/Marketplace.jsx` · Connections tab in `AgentDetail.jsx` · `tests/graded/test_step_06_install.py` |
+| 1 Register a tool server | ✅ done | Form: name, transport (stdio / http / sse), endpoint, auth type, shared or private. The platform connects out and calls `tools/list` — no tool is typed by hand. Read / write / destructive marking. Health job every 5 min marks dead servers `down`. Sharing with everyone = company admins only. | `app/api/routers/servers.py` · `app/mcp_registry/registry.py` · `app/mcp_registry/catalogue.py` · `app/mcp_registry/health.py` · `app/mcp_registry/client.py` (transports + `classify_risk`) · `app/models/tenant.py` (`McpServer`, `McpTool`) · `app/models/platform_.py` (`SharedServer`, `SharedTool`) · `Frontend/src/pages/Registry.jsx` |
+| 2 Connect to it | ✅ done | AES-256-GCM envelope encryption, per-row data key, AAD = tenant + server. No endpoint returns a secret; the UI shows dots. A test stores a sentinel token and greps every table in every schema for it. | `app/vault/envelope.py` · `app/vault/connections.py` · `app/vault/resolver.py` · `app/api/routers/connections.py` · `app/models/tenant.py` (`Connection`) · `Frontend/src/pages/Connections.jsx` |
+| 3 Describe an agent | ✅ | Builder graph with two LangGraph interrupts (`select_tools`, `missing_connection`); survives `docker compose restart api`; form mode drives the *same* graph; the result card shows the score. | `app/builder/schema.py` (`AgentConfig`) · `app/builder/graph.py` · `app/api/routers/builds.py` · `app/tenancy/checkpointers.py` · `Frontend/src/pages/Build.jsx` |
+| 4 Test it | ✅ except API tab | Agent page, graph from config, tools table, **Playground** (chat; a write tool pauses the run and shows Approve / Reject inline; survives an API restart; 👍/👎), **Runs** tab, **Scores** (quality 0–100 from six checks, safety A–D from five; each with its reason; `blocked_by` names why it cannot be published). **No API tab.** | `app/api/routers/runs.py` · `app/scoring/score.py` · `app/api/routers/agents.py` (`/scores`) · `Frontend/src/pages/Playground.jsx` · `Frontend/src/pages/AgentDetail.jsx` — pending: API tab |
+| 5 Publish it | ✅ | Settings tab: Publish is disabled below the threshold and says why; above it, the author sees exactly what will leave (allowlist projection + scrubber), then a publish graph starts and **parks on `admin_review`** in the author's company checkpoints. The platform admin's **Admin Review** queue approves / requests changes / rejects — resuming that run, across restarts. Approval is the only way into `platform.listings`. | `app/publishing/sanitize.py` · `app/publishing/graph.py` · `app/api/routers/publishing.py` · `Submission` / `SubmissionIndex` / `Listing` models · `Frontend/src/pages/Settings.jsx` · `Frontend/src/pages/AdminReview.jsx` |
+| 6 Someone else installs it | ✅ | Marketplace lists approved designs; a listing page shows what it needs from *you* (connected / needs credential / no credential); **Add to my workspace** copies the sanitized design into the installer's schema as their own agent (`installed_from` set, `installs` counted) and lands on its Connections tab to connect their own credentials. The publisher's agent, runs and tokens are untouched and unreachable. | `app/api/routers/publishing.py` (`/v1/listings/{id}`, `/install`) · `Frontend/src/pages/Marketplace.jsx` · Connections tab in `AgentDetail.jsx` · `tests/graded/test_step_06_install.py` |
 
 Cross-cutting, already done: `app/core/db.py` + `app/api/deps.py` (tenant gate), `app/core/security.py` +
 `app/api/routers/auth.py` (sign-up / sign-in), `app/tenancy/provision.py` (schema per company),
-`app/server.py` (FastAPI app, lifespan), `web/src/Shell.jsx` + `App.jsx` (nav, routes),
+`app/server.py` (FastAPI app, lifespan), `Frontend/src/Shell.jsx` + `App.jsx` (nav, routes),
 `docker-compose.yml` + `Dockerfile`.
 
 ### The nine graded checks
@@ -37,7 +37,7 @@ Cross-cutting, already done: `app/core/db.py` + `app/api/deps.py` (tenant gate),
 | 4 | Planted confidential material does not survive publication | ✅ | allowlist projection (`listing_from`) + scrubber for the free text (emails, links, internal hosts, IPs, paths, ticket refs, the company's name); a token cannot even enter a config | `app/publishing/sanitize.py` · `tests/graded/test_check_04_sanitize.py` |
 | 5 | Kill the server mid-build, it resumes on restart | ✅ | `interrupt()` + per-tenant `AsyncPostgresSaver` | `app/builder/graph.py` · `app/tenancy/checkpointers.py` · `app/api/routers/builds.py` · `tests/graded/test_form_and_chat_agree.py` |
 | 6 | Approval pending overnight still resumes | ✅ | publish graph parked on `interrupt("admin_review")` in the author's company checkpoints; the admin resumes it via `platform.submission_index` | `app/publishing/graph.py` · `app/api/routers/publishing.py` · `tests/graded/test_check_06_overnight.py` (cold-restart resume) |
-| 7 | Playground runs the multi-agent demo incl. approval | ✅ | supervisor topology compiled from config; approval inside the tool wrapper; Approve / Reject in the chat | `app/runtime/compiler.py` · `app/runtime/guarded_tool.py` · `app/api/routers/runs.py` · `web/src/pages/Playground.jsx` · `tests/graded/test_check_07_runtime.py` |
+| 7 | Playground runs the multi-agent demo incl. approval | ✅ | supervisor topology compiled from config; approval inside the tool wrapper; Approve / Reject in the chat | `app/runtime/compiler.py` · `app/runtime/guarded_tool.py` · `app/api/routers/runs.py` · `Frontend/src/pages/Playground.jsx` · `tests/graded/test_check_07_runtime.py` |
 | 8 | Downloaded Postman collection gets a real response | ❌ | needs public `/v1/agents/{id}/invoke` + generated collection | to create: `app/api/routers/public.py` · `app/api/postman.py` · `tests/graded/test_check_08_postman.py` |
 | 9 | Another company's agent by id does not reveal it exists | ✅ | wrong schema → 0 rows → 404, byte-identical body | `app/api/routers/agents.py` · `app/api/deps.py` (`NOT_FOUND`) · `tests/graded/test_check_01_isolation.py` |
 
@@ -46,8 +46,8 @@ Cross-cutting, already done: `app/core/db.py` + `app/api/deps.py` (tenant gate),
 ### Health of the tree
 
 - `uv run pytest -q` → **118 passed, 1 skipped** (the skip is the opt-in live-model test).
-- `cd web && npm run build` → clean.
-- `docker compose up -d --build` → 4 containers up (`db`, `api`, `web`, `pgadmin`).
+- `cd Frontend && npm run build` → clean.
+- `docker compose up -d --build` → 4 containers up (`db`, `api`, `frontend`, `pgadmin`).
 - Dead code and scratch files were cleaned up on 11 Sep; every column now has a descriptive name
   (`tenants.schema_key`, `mcp_servers.health`/`visibility`/`credential_env_var`, `connections.encrypted_secret`…).
 - **Nothing is committed yet.** First action for whoever reads this: `git add -A && git commit`.
@@ -99,7 +99,7 @@ SERVICE       STATUS
 api           Up ...
 db            Up ... (healthy)
 pgadmin       Up ...
-web           Up ...
+frontend      Up ...
 
 $ curl localhost:8000/health
 {"ok":true}
@@ -111,8 +111,9 @@ $ curl localhost:8000/health
 | <http://localhost:8000/docs> | FastAPI Swagger | cookie from the UI, or paste the JWT |
 | <http://localhost:5050> | pgAdmin (the database, in a browser) | `admin@forge.dev` / `admin`; server `forge` is pre-registered (Postgres superuser — the app itself uses `forge_app`) |
 
-Code under `app/` and `web/src/` is volume-mounted: edit locally, the containers reload.
-Rebuild (`--build`) only when `pyproject.toml`, `Dockerfile` or `web/package.json` change.
+Code under `app/` and `Frontend/src/` is volume-mounted: edit locally, the containers reload.
+Rebuild (`--build`) only when `pyproject.toml`, `Dockerfile` or `Frontend/package.json` change.
+If the UI is ever down: `docker compose ps` — if `frontend` is missing, `docker compose up -d frontend`.
 
 ### When the models change
 
@@ -369,7 +370,7 @@ app/
   tenancy/    provision.py (create/drop schema), checkpointers.py (per-tenant AsyncPostgresSaver)
   vault/      envelope.py (the only place plaintext exists), service.py, resolver.py
   server.py   FastAPI app, lifespan (bootstrap platform schema, start health sweep)
-web/src/           React + Vite: pages/ (SignIn, Registry, Connections, Build, MyAgents, AgentDetail)
+Frontend/src/           React + Vite: pages/ (SignIn, Registry, Connections, Build, MyAgents, AgentDetail)
 scripts/           reset_db.py · inspect_db.py · verify_isolation.py · run_agent.py
 tests/             graded/ (one file per implemented check) · fixtures/ (two sample configs)
 docker/pgadmin/    pre-registered server + password for pgAdmin
