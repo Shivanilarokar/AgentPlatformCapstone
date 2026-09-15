@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 import jwt
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.exc import DataError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import platform_session, tenant_session
@@ -56,8 +57,15 @@ def workspace_user(claims: Claims = Depends(current_user)) -> Claims:
 
 async def tenant_db(claims: Claims = Depends(workspace_user)) -> AsyncIterator[AsyncSession]:
     """One transaction, pointed at this company's schema and this person's rows."""
-    async with tenant_session(claims.tenant_key, claims.user_id) as session:
-        yield session
+    try:
+        async with tenant_session(claims.tenant_key, claims.user_id) as session:
+            yield session
+    except DataError as exc:
+        # The company in this token no longer exists (database reset). The
+        # session is stale, not the request wrong: sign in again.
+        if "does not exist" in str(exc):
+            raise HTTPException(401, detail={"error": "session_stale"}) from None
+        raise
 
 
 async def platform_db() -> AsyncIterator[AsyncSession]:

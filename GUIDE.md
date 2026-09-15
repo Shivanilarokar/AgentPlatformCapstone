@@ -121,6 +121,8 @@ There is no Alembic yet. After any change to `app/models/*.py`:
 
 ```bash
 cd backend && uv run python scripts/reset_db.py      # drops every schema and rebuilds them - all data is gone
+# afterwards: sign OUT in the browser (the old cookie names a company that no longer exists),
+# sign the accounts up again, and as admin@forge.dev share filesystem / git / sqlite
 ```
 
 Then sign up again in the UI.

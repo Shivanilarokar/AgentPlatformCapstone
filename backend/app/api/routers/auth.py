@@ -139,5 +139,8 @@ async def logout(response: Response):
 @router.get("/me", response_model=Me)
 async def me(claims: Claims = Depends(current_user), db: AsyncSession = Depends(platform_db)):
     tenant = await db.get(Tenant, claims.tenant_id) if claims.tenant_id else None
+    if claims.tenant_id and tenant is None:
+        # the company in this token is gone (database reset): the UI must sign in again
+        raise HTTPException(401, detail={"error": "session_stale"})
     return Me(email=claims.email, name=claims.name,
               company=tenant.name if tenant else None, role=claims.role)
