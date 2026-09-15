@@ -51,7 +51,7 @@ Cross-cutting, already done: `app/core/db.py` + `app/api/deps.py` (tenant gate),
 - Dead code and scratch files were cleaned up on 11 Sep; every column now has a descriptive name
   (`tenants.schema_key`, `mcp_servers.health`/`visibility`/`credential_env_var`, `connections.encrypted_secret`…).
 - **Nothing is committed yet.** First action for whoever reads this: `git add -A && git commit`.
-- No Alembic yet — every model change means `uv run python scripts/reset_db.py` and signing up again.
+- No Alembic yet — every model change means `uv run python backend/scripts/reset_db.py` and signing up again.
 
 ### What is pending — build order
 
