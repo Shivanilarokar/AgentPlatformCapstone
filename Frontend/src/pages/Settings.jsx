@@ -91,8 +91,8 @@ export function SettingsTab({ agent, onChanged }) {
             </div>
             <p className="faint" style={{ fontSize: 12, marginBottom: 0 }}>
               {preview.can_publish
-                ? "An admin reviews it before anyone else can see it."
-                : "Test it more, and give it only the tools it actually uses. A score that blocks nothing is decoration."}
+                ? "The platform admin reviews it before anyone else can see it."
+                : "To unlock: run it in the Playground, approve what it asks, and rate the run 👍. A score that blocks nothing is decoration."}
             </p>
           </>
         )}

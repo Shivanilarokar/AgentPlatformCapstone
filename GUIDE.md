@@ -63,6 +63,14 @@ Cross-cutting, already done: `app/core/db.py` + `app/api/deps.py` (tenant gate),
 ≈ 4 engineer-days across four people. **Freeze features 18 Sep.** 19–20 Sep: the nine checks as
 automated tests, demo recording, design write-up.
 
+### The demo agent (Rule 8) — exists, built through Build
+
+Prompt: *"I want an agent that reads my open GitHub issues every morning and posts a summary to
+Slack."* → **GitHub Issue Daily Summary**: coordinator + `collector` (`github.list_issues`) +
+`poster` (`slack.slack_send_message`, asks first). Run, rated, scored 85 / A, published by
+Northwind Labs, approved by the platform admin, installed by Jai at Maven — the brief's sentence,
+end to end. The publish gate needs one finished run rated 👍 (`MIN_RUNS = 1` in `scoring/score.py`).
+
 ### Two things to do today
 
 1. Commit the tree (see above).

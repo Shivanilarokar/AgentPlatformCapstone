@@ -288,7 +288,7 @@ export default function Build() {
                 <div className="msg bot">
                   <div className="who-av">F</div>
                   <div className="body" style={{ width: "100%" }}>
-                    <p style={{ marginTop: 0 }}>Built and saved. Here it is:</p>
+                    <p style={{ marginTop: 0 }}>Built and deployed. It is live in your workspace — try it in the Playground:</p>
                     <Card style={{ maxWidth: 520 }}>
                       <div className="between" style={{ marginBottom: 8 }}>
                         <div style={{ fontWeight: 650, fontSize: 15 }}>{state.config?.name}</div>
@@ -318,7 +318,8 @@ export default function Build() {
                           : <span className="faint">scoring…</span>}</dd>
                       </dl>
                       <hr className="sep" />
-                      <Link className="btn primary sm" to="/agents">Go to My Agents</Link>
+                      <Link className="btn primary sm" to={`/agents/${state.agent_id}?tab=playground`}>Open the Playground</Link>
+                      <Link className="btn sm" to="/agents" style={{ marginLeft: 6 }}>My Agents</Link>
                     </Card>
                   </div>
                 </div>

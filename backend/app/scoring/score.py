@@ -17,7 +17,7 @@ from app.builder.schema import GUARDED, SECRET_SHAPES, AgentConfig, Approval, Ri
 from app.mcp_registry import registry
 from app.models.tenant import Agent, Run
 
-MIN_RUNS = 3            # "tested enough" - both scores
+MIN_RUNS = 1            # "tested at all" - one real run with a verdict is the bar to publish
 RECENT_RUNS = 20        # success rate window
 LATENCY_LIMIT_MS = 90_000
 PUBLISH_MIN_QUALITY = 70

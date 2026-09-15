@@ -59,7 +59,16 @@ export default function AdminReview() {
                 {showDecided ? "waiting only" : "show decided"}
               </button>
             </div>
-            {shown.length === 0 && <Card><span className="muted">Nothing waiting.</span></Card>}
+            {shown.length === 0 && (
+              <Card>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>Nothing waiting</div>
+                <div className="muted" style={{ fontSize: 12.8 }}>
+                  An item appears here the moment an author clicks <b>Publish to Marketplace</b> on
+                  their agent's Settings tab. That button unlocks once the agent has been run in the
+                  Playground and rated 👍 — until then the score blocks it and says why.
+                </div>
+              </Card>
+            )}
             {shown.map((q) => (
               <div key={q.submission_id} className={`qitem ${q.submission_id === s?.submission_id ? "sel" : ""}`}
                    onClick={() => setSelected(q)} style={{ cursor: "pointer" }}>
