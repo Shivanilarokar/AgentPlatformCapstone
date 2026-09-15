@@ -18,7 +18,7 @@ WORKDIR /srv
 ENV PYTHONPATH=/srv
 
 # Dependencies first, so editing code does not reinstall the world on every build.
-COPY pyproject.toml README.md ./
+COPY pyproject.toml ./
 RUN uv pip install --system --no-cache -r pyproject.toml
 
 COPY app ./app

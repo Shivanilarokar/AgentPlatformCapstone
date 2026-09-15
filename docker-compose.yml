@@ -20,11 +20,11 @@ services:
       retries: 20
 
   api:
-    build: .
+    build: ./backend
     # Model provider keys and the vault master key live in .env, which is
     # gitignored. `required: false` keeps a fresh clone working without one.
     env_file:
-      - path: .env
+      - path: ./backend/.env
         required: false
     environment:
       # "db" is the service name above - Docker's DNS resolves it to that container.
@@ -32,7 +32,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./app:/srv/app          # edit locally, --reload picks it up, no rebuild
+      - ./backend/app:/srv/app  # edit locally, --reload picks it up, no rebuild
       - forge_var:/srv/var      # the sqlite server's database file
       - forge_workspace:/srv/workspace   # what the filesystem server may touch
     depends_on:

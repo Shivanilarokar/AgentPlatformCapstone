@@ -45,7 +45,7 @@ Cross-cutting, already done: `app/core/db.py` + `app/api/deps.py` (tenant gate),
 
 ### Health of the tree
 
-- `uv run pytest -q` → **118 passed, 1 skipped** (the skip is the opt-in live-model test).
+- `cd backend && uv run pytest -q` → **170 passed, 1 skipped** (the skip is the opt-in live-model test).
 - `cd Frontend && npm run build` → clean.
 - `docker compose up -d --build` → 4 containers up (`db`, `api`, `frontend`, `pgadmin`).
 - Dead code and scratch files were cleaned up on 11 Sep; every column now has a descriptive name
@@ -79,13 +79,13 @@ You need **Docker Desktop**, **uv** (<https://docs.astral.sh/uv/>) and **Node 20
 git clone <repo> && cd AgentPlatformCapstone
 
 # 1. Secrets. Never commit .env - it is gitignored.
-cat > .env <<'EOF'
+cat > backend/.env <<'EOF'
 GOOGLE_API_KEY=<your Gemini key from https://aistudio.google.com/apikey>
 GROQ_API_KEY=<optional, free at https://console.groq.com - used when Gemini is rate-limited>
 EOF
 
-# 2. Python deps on the host (for tests and scripts). Creates .venv.
-uv sync --extra dev
+# 2. Python deps on the host (for tests and scripts). Creates backend/.venv.
+cd backend && uv sync --extra dev && cd ..
 
 # 3. Everything else runs in Docker.
 docker compose up -d --build
@@ -112,7 +112,7 @@ $ curl localhost:8000/health
 | <http://localhost:5050> | pgAdmin (the database, in a browser) | `admin@forge.dev` / `admin`; server `forge` is pre-registered (Postgres superuser — the app itself uses `forge_app`) |
 
 Code under `app/` and `Frontend/src/` is volume-mounted: edit locally, the containers reload.
-Rebuild (`--build`) only when `pyproject.toml`, `Dockerfile` or `Frontend/package.json` change.
+Rebuild (`--build`) only when `backend/pyproject.toml`, `backend/Dockerfile` or `Frontend/package.json` change.
 If the UI is ever down: `docker compose ps` — if `frontend` is missing, `docker compose up -d frontend`.
 
 ### When the models change
@@ -120,7 +120,7 @@ If the UI is ever down: `docker compose ps` — if `frontend` is missing, `docke
 There is no Alembic yet. After any change to `app/models/*.py`:
 
 ```bash
-uv run python scripts/reset_db.py      # drops every schema and rebuilds them - all data is gone
+cd backend && uv run python scripts/reset_db.py      # drops every schema and rebuilds them - all data is gone
 ```
 
 Then sign up again in the UI.
@@ -128,8 +128,8 @@ Then sign up again in the UI.
 ### Run the tests
 
 ```bash
-uv run pytest -q                        # needs `docker compose up` (Postgres) - ~50 s
-# expected: 118 passed, 1 skipped   (the skip is the live-model test; opt in with LIVE_MODEL=1)
+cd backend && uv run pytest -q         # needs `docker compose up` (Postgres) - ~90 s
+# expected: 170 passed, 1 skipped   (the skip is the live-model test; opt in with LIVE_MODEL=1)
 ```
 
 `tests/graded/` has one file per graded check that is implemented so far (1, 2, 7 plus the
@@ -184,8 +184,8 @@ keyed `<user_id>/<build id>`, so a colleague's build id names a thread that does
 Verify it yourself, three ways:
 
 ```bash
-uv run python scripts/verify_isolation.py   # 18 checks over HTTP against the running stack
-uv run pytest -q tests/graded/test_check_01_isolation.py   # the same at the SQL layer, incl. RLS edge cases
+cd backend && uv run python scripts/verify_isolation.py   # 18 checks over HTTP against the running stack
+cd backend && uv run pytest -q tests/graded/test_check_01_isolation.py   # the same at the SQL layer, incl. RLS edge cases
 ```
 
 ```sql
@@ -308,7 +308,7 @@ JOIN platform.users u ON u.tenant_id = t.id;
 ```bash
 docker compose exec db psql -U forge -d forge -c '\dn'                      # list schemas
 docker compose exec db psql -U forge -d forge -c '\dt t_northwind_labs.*'   # tables in yours
-uv run python scripts/inspect_db.py                                         # every table, every schema
+cd backend && uv run python scripts/inspect_db.py                                         # every table, every schema
 ```
 
 ### Column names, and what each one means
@@ -359,22 +359,28 @@ uv run python scripts/inspect_db.py                                         # ev
 ## 6. Repo map
 
 ```
-app/
-  api/        deps.py (tenant gate: SET LOCAL search_path), routers/ (auth, servers, connections, builds, agents)
-  builder/    schema.py (AgentConfig - THE document), graph.py (the build graph, two interrupts)
-  core/       config.py (.env), db.py (engine, tenant_session), security.py (argon2, JWT)
-  models/     platform_.py (shared schema), tenant.py (per-company schema)
-  mcp_registry/ catalogue.py (public servers we know), service.py (register/discover/refresh), health.py
-  runtime/    mcp_client.py (real MCP over stdio/http/sse, risk classification), guarded_tool.py
-              (the approval gate), compiler.py (config -> LangGraph), models.py (provider fallbacks)
-  tenancy/    provision.py (create/drop schema), checkpointers.py (per-tenant AsyncPostgresSaver)
-  vault/      envelope.py (the only place plaintext exists), service.py, resolver.py
-  server.py   FastAPI app, lifespan (bootstrap platform schema, start health sweep)
-Frontend/src/           React + Vite: pages/ (SignIn, Registry, Connections, Build, MyAgents, AgentDetail)
-scripts/           reset_db.py · inspect_db.py · verify_isolation.py · run_agent.py
-tests/             graded/ (one file per implemented check) · fixtures/ (two sample configs)
-docker/pgadmin/    pre-registered server + password for pgAdmin
-docs/              ARCHITECTURE.md · DESIGN.md · architecture.drawio
+backend/                     everything Python. ONE entry point: app/server.py (uvicorn app.server:app)
+  app/
+    api/        deps.py (the gate: SET LOCAL ROLE + search_path + app.user_id), routers/
+                (auth, servers, connections, builds, agents, runs, publishing)
+    builder/    schema.py (AgentConfig - THE document), graph.py (the build graph, two interrupts)
+    core/       config.py (.env), db.py (engine, tenant_session), security.py (argon2, JWT)
+    models/     platform_.py (shared schema), tenant.py (per-company schema)
+    mcp_registry/ catalogue.py (addresses), mcp_client.py (transports, tools/list), risk.py,
+                registry.py (register/refresh/list), health.py (the sweep)
+    runtime/    compiler.py (config -> LangGraph), guarded_tool.py (the approval gate), models.py
+    scoring/    score.py (quality 0-100, safety A-D, publish gate)
+    publishing/ sanitize.py (allowlist + scrubber), graph.py (parks on admin_review)
+    tenancy/    provision.py (schema + role + RLS per company), checkpointers.py
+    vault/      envelope.py (the only place plaintext exists), connections.py, resolver.py
+  tests/        graded/ (one file per check + steps 4-6) · fixtures/ (sample configs)
+  scripts/      reset_db.py · inspect_db.py · verify_isolation.py · run_agent.py
+  pyproject.toml · uv.lock · Dockerfile · .env (gitignored)
+Frontend/                    React + Vite: src/pages/ (SignIn, Registry, Connections, Build, MyAgents,
+                             AgentDetail, Playground, Settings, Marketplace, AdminReview)
+docker/                      db/init.sql (the non-superuser app role) · pgadmin/ (pre-registered server)
+docker-compose.yml           db · api · frontend · pgadmin
+docs/                        ARCHITECTURE.md · DESIGN.md · architecture.drawio
 ```
 
 ## 7. House rules

@@ -839,7 +839,7 @@ async def test_isolation_holds_without_any_filter():
 
 ### Step 3 — one agent configuration, typed by hand
 
-Create `app/builder/schema.py` with the Pydantic model, and `fixtures/issue_digest.json` written
+Create `backend/app/builder/schema.py` with the Pydantic model, and `fixtures/issue_digest.json` written
 **by hand, by the four of you together**. Do not generate it. This conversation is the most valuable
 hour of the fortnight — it forces you to decide what an agent *is*.
 

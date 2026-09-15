@@ -2,7 +2,6 @@
 name = "agentplatformcapstone"
 version = "0.1.0"
 description = "Multi-tenant agent platform - Data Sense capstone"
-readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
