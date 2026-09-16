@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from typing import Any
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -27,7 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import NOT_FOUND, platform_db, tenant_db, workspace_user
-from app.api.routers.runs import InvokeIn, _agent, _apply, _graph, _out, _state
+from app.api.routers.runs import _agent, _apply, _graph, _out, _state
 from app.builder.schema import AgentConfig
 from app.core.security import Claims, new_api_token
 from app.mcp_registry import registry
@@ -120,26 +121,60 @@ async def readiness(agent_id: UUID, db: AsyncSession = Depends(tenant_db)):
 # ------------------------------------------------------------------ stream
 
 
+class StreamIn(BaseModel):
+    """Either start a run (`input`) or answer a pending one (`run_id` + `decision`)."""
+
+    input: str | None = Field(default=None, max_length=4000)
+    run_id: UUID | None = None
+    decision: str | None = Field(default=None, pattern=r"^(approve|reject)$")
+
+
 @router.post("/v1/agents/{agent_id}/stream")
-async def stream(agent_id: UUID, body: InvokeIn, request: Request,
+async def stream(agent_id: UUID, body: StreamIn, request: Request,
                  claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db)):
-    """Same as /invoke, as Server-Sent Events: `step` per graph node, then
-    `awaiting_approval` (with the redacted args) or `done`."""
+    """The playground's live view, as Server-Sent Events:
+
+        run        {id, status}                       first
+        activity   {kind: thinking|route|tool_call|tool_result, ...}  as it happens
+        step       {line}                             each transcript line
+        <status>   the finished RunOut                last: ok | awaiting_approval | rejected | error
+
+    Activity never carries tool arguments - the approval card is where those
+    are shown, redacted.
+    """
+    from langgraph.types import Command
+
     agent = await _agent(db, agent_id)
-    run = Run(agent_id=agent.id, input=body.input, trigger="api",
-              thread_id=f"{claims.user_id}/run-{uuid.uuid4().hex[:12]}")
-    db.add(run)
-    await db.flush()
+    if body.run_id is not None:
+        run = await db.scalar(select(Run).where(Run.id == body.run_id, Run.agent_id == agent.id))
+        if run is None:
+            raise HTTPException(404, detail=NOT_FOUND)
+        if run.status != "awaiting_approval" or not body.decision:
+            raise HTTPException(409, detail={"error": "not_waiting", "detail": f"run is {run.status}"})
+        state: Any = Command(resume=body.decision)
+    else:
+        if not body.input:
+            raise HTTPException(422, detail={"error": "input_required"})
+        trigger = "api" if (request.headers.get("authorization") or "").startswith("Bearer forge_") else "playground"
+        run = Run(agent_id=agent.id, input=body.input, trigger=trigger,
+                  thread_id=f"{claims.user_id}/run-{uuid.uuid4().hex[:12]}")
+        db.add(run)
+        await db.flush()
+        state = _state(run)
+
     graph = await _graph(claims, agent, run.thread_id)
     cfg = {"configurable": {"thread_id": run.thread_id}}
 
     async def events():
         started = time.perf_counter()
         yield _sse("run", {"id": str(run.id), "status": "running"})
-        shown = 0
+        shown = len(run.transcript or []) if body.run_id else 0
         result: dict = {}
         try:
-            async for chunk in graph.astream(_state(run), config=cfg, stream_mode="values"):
+            async for mode, chunk in graph.astream(state, config=cfg, stream_mode=["values", "custom"]):
+                if mode == "custom":
+                    yield _sse("activity", chunk)
+                    continue
                 result = chunk
                 lines = chunk.get("transcript", [])
                 for line in lines[shown:]:
@@ -214,7 +249,7 @@ async def postman(agent_id: UUID, request: Request, claims: Claims = Depends(wor
             req("Readiness", "GET", f"/v1/agents/{aid}/readiness", None, "Which connections this run needs, and which are missing."),
             req("Agent", "GET", f"/v1/agents/{aid}", None, "The configuration, graph and scores."),
             req("Stream (SSE)", "POST", f"/v1/agents/{aid}/stream", {"input": "Run today's digest."},
-                "Same as Invoke, as Server-Sent Events."),
+                "Same as Invoke, as Server-Sent Events: activity as it happens, then the outcome."),
         ],
     }
     return collection

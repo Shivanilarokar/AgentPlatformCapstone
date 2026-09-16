@@ -106,8 +106,14 @@ async def _graph(claims: Claims, agent: Agent, thread_id: str):
 
 
 def _apply(run: Run, result: dict[str, Any], started: float) -> None:
-    """Fold a graph result into the run row."""
+    """Fold a graph result into the run row.
+
+    `latency_ms` is the agent's OWN working time, summed across the segments
+    before and after each approval. The minutes a human spends deciding are not
+    the agent's latency and must not cost it score points.
+    """
     run.transcript = list(result.get("transcript", []))
+    run.latency_ms = (run.latency_ms or 0) + int((time.perf_counter() - started) * 1000)
     pending = result.get("__interrupt__")
     if pending:
         run.status = "awaiting_approval"
@@ -116,7 +122,6 @@ def _apply(run: Run, result: dict[str, Any], started: float) -> None:
 
     run.pending = None
     run.finished_at = datetime.now(timezone.utc)
-    run.latency_ms = int((time.perf_counter() - started) * 1000)
     results = result.get("results", {})
     summaries = [v for k, v in results.items() if k.endswith(".summary")]
     run.output = summaries[-1] if summaries else "(no answer)"
@@ -174,9 +179,6 @@ async def resume(
             Command(resume=body.decision), config={"configurable": {"thread_id": run.thread_id}}
         )
         _apply(run, result, started)
-        if run.latency_ms is not None and run.started_at:
-            # latency covers the whole run, not just the part after approval
-            run.latency_ms = int((datetime.now(timezone.utc) - run.started_at).total_seconds() * 1000)
     except Exception as exc:  # noqa: BLE001
         run.status, run.output = "error", f"{type(exc).__name__}: {str(exc)[:300]}"
         run.finished_at = datetime.now(timezone.utc)

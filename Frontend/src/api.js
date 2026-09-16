@@ -39,6 +39,40 @@ export const post = (path, data) =>
   request(path, { method: "POST", body: JSON.stringify(data ?? {}) });
 export const del = (path) => request(path, { method: "DELETE" });
 
+/* Server-Sent Events over a POST. Calls onEvent(name, data) per event and
+ * resolves when the server closes the stream. */
+export async function stream(path, data, onEvent) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    credentials: "same-origin",
+    body: JSON.stringify(data ?? {}),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    const d = body?.detail;
+    throw new ApiError(res.status, d?.error ?? "error", d?.detail ?? d?.error ?? `HTTP ${res.status}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, i); buf = buf.slice(i + 2);
+      let name = "message", payload = "";
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event:")) name = line.slice(6).trim();
+        else if (line.startsWith("data:")) payload += line.slice(5).trim();
+      }
+      if (payload) onEvent(name, JSON.parse(payload));
+    }
+  }
+}
+
 /* ------------------------------------------------------------------ helpers */
 
 export function ago(iso) {

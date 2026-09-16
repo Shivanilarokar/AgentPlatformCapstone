@@ -10,8 +10,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { ago, get, post } from "../api";
-import { Badge, Card, Check, Note, SectionTitle } from "../ui";
+import { ago, get, post, stream } from "../api";
+import { Badge, Card, Check, Note, RiskBadge, SectionTitle } from "../ui";
 
 const STATUS_TONE = { ok: "ok", awaiting_approval: "warn", rejected: "", error: "danger", running: "" };
 const STATUS_LABEL = { ok: "ok", awaiting_approval: "approval", rejected: "rejected", error: "error", running: "running" };
@@ -31,9 +31,11 @@ function Line({ text }) {
   if (arrow) return <p><Badge>{who}</Badge> → <Badge>{arrow[1]}</Badge></p>;
   const call = rest.match(/^(\S+\.\S+)\s*->\s*(.*)$/);
   if (call) {
+    const failed = call[2].startsWith("ERROR");
     return (
       <p className="muted" style={{ fontSize: 12.5 }}>
-        <Badge>{who}</Badge> called <code>{call[1]}</code> — {call[2]}
+        <Badge>{who}</Badge> called <code>{call[1]}</code> —{" "}
+        {failed ? <span style={{ color: "var(--danger)" }}>{call[2].replace(/^ERROR from \S+:\s*/, "the server answered: ")}</span> : call[2]}
       </p>
     );
   }
@@ -111,6 +113,29 @@ function NeedsConnection({ readiness, onRecheck, onRunAnyway }) {
   );
 }
 
+function Activity({ a }) {
+  if (!a) return null;
+  const who = a.worker ? <Badge>{a.worker}</Badge> : null;
+  if (a.kind === "thinking") return <p className="muted" style={{ fontSize: 12.5 }}>{who} thinking…</p>;
+  if (a.kind === "route") return <p className="muted" style={{ fontSize: 12.5 }}><Badge>supervisor</Badge> → handing the work to <Badge>{a.to}</Badge></p>;
+  if (a.kind === "tool_call") {
+    return (
+      <p className="muted" style={{ fontSize: 12.5 }}>
+        {who} calling <code>{a.tool}</code> <RiskBadge risk={a.risk} />
+        {a.asks && <span className="faint"> — a human will be asked first</span>}
+      </p>
+    );
+  }
+  if (a.kind === "tool_result") {
+    return (
+      <p className="muted" style={{ fontSize: 12.5 }}>
+        {who} <code>{a.tool}</code> {a.ok ? "answered" : <span style={{ color: "var(--danger)" }}>failed</span>}
+      </p>
+    );
+  }
+  return null;
+}
+
 /* ------------------------------------------------------------- playground */
 
 export function PlaygroundTab({ agent }) {
@@ -122,7 +147,12 @@ export function PlaygroundTab({ agent }) {
   const [readiness, setReadiness] = useState(null);
   const [gate, setGate] = useState(null);      // the readiness card, when a run was refused
   const [pendingInput, setPendingInput] = useState("");
+  const [live, setLive] = useState([]);        // activity events for the run in progress
+  const [now, setNow] = useState(null);        // the latest activity, shown under the composer
+  const [score, setScore] = useState(null);
   const bottom = useRef(null);
+
+  const loadScore = useCallback(() => get(`/v1/agents/${agent.id}/scores`).then(setScore).catch(() => {}), [agent.id]);
 
   const checkReady = useCallback(async () => {
     const r = await get(`/v1/agents/${agent.id}/readiness`);
@@ -138,8 +168,30 @@ export function PlaygroundTab({ agent }) {
     setCurrent((cur) => waiting ?? (cur ? rows.find((r) => r.id === cur.id) ?? cur : rows[0] ?? null));
   }, [agent.id]);
 
-  useEffect(() => { load().catch((e) => setError(e.message)); checkReady().catch(() => {}); }, [load, checkReady]);
-  useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [current, busy]);
+  useEffect(() => { load().catch((e) => setError(e.message)); checkReady().catch(() => {}); loadScore(); }, [load, checkReady, loadScore]);
+  useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [current, busy, live]);
+
+  // One streaming call for both starting and answering: activity arrives live,
+  // transcript lines as each step completes, the finished run last.
+  async function drive(body, seed) {
+    setBusy(true); setError(null); setLive([]); setNow(null);
+    setCurrent(seed);
+    const lines = [...(seed.transcript ?? [])];
+    try {
+      await stream(`/v1/agents/${agent.id}/stream`, body, (name, data) => {
+        if (name === "run") setCurrent((c) => ({ ...c, id: data.id }));
+        else if (name === "activity") { setLive((l) => [...l, data]); setNow(data); }
+        else if (name === "step") { lines.push(data.line); setCurrent((c) => ({ ...c, transcript: [...lines] })); }
+        else { // ok | awaiting_approval | rejected | error - the finished RunOut
+          setCurrent(data);
+          setRuns((rs) => (rs.some((x) => x.id === data.id) ? rs.map((x) => (x.id === data.id ? data : x)) : [data, ...rs]));
+          setNow(null);
+        }
+      });
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+    loadScore();
+  }
 
   async function send(force = false) {
     const text = (force ? pendingInput : input).trim();
@@ -151,25 +203,12 @@ export function PlaygroundTab({ agent }) {
       if (r && !r.ready) { setGate(r); setPendingInput(text); return; }
     }
     setGate(null);
-    setBusy(true);
     setInput("");
-    setCurrent({ id: "pending", input: text, status: "running", transcript: [], pending: null, output: "" });
-    try {
-      const r = await post(`/v1/agents/${agent.id}/invoke`, { input: text });
-      setCurrent(r);
-      setRuns((rs) => [r, ...rs]);
-    } catch (e) { setError(e.message); setCurrent(null); }
-    setBusy(false);
+    await drive({ input: text }, { id: "pending", input: text, status: "running", transcript: [], pending: null, output: "" });
   }
 
   async function decide(decision) {
-    setBusy(true); setError(null);
-    try {
-      const r = await post(`/v1/agents/${agent.id}/runs/${current.id}/resume`, { decision });
-      setCurrent(r);
-      setRuns((rs) => rs.map((x) => (x.id === r.id ? r : x)));
-    } catch (e) { setError(e.message); }
-    setBusy(false);
+    await drive({ run_id: current.id, decision }, { ...current, status: "running", pending: null });
   }
 
   async function rate(value) {
@@ -204,7 +243,11 @@ export function PlaygroundTab({ agent }) {
 
           {r && r.status === "running" && (
             <div className="msg bot"><div className="who-av">F</div>
-              <div className="body muted">Working… (real model, real tools — this takes a moment)</div></div>
+              <div className="body" style={{ width: "100%" }}>
+                {live.length === 0 && <p className="muted" style={{ margin: 0 }}>Starting — compiling the agent from its configuration and asking each server for its tools…</p>}
+                {live.slice(-6).map((a, i) => <Activity key={i} a={a} />)}
+                {now && <p className="faint" style={{ fontSize: 12, margin: 0 }}>⋯ live — a real model and real servers; each line appears the moment it happens</p>}
+              </div></div>
           )}
 
           {r && r.status === "awaiting_approval" && r.pending && (
@@ -266,6 +309,24 @@ export function PlaygroundTab({ agent }) {
             </>
           ) : <div className="muted" style={{ fontSize: 13 }}>No run yet.</div>}
         </Card>
+
+        {score && (
+          <>
+            <SectionTitle>Score</SectionTitle>
+            <Card>
+              <div className="between">
+                <div><div className="faint" style={{ fontSize: 11.5 }}>Does it work?</div><div style={{ fontSize: 22, fontWeight: 700 }}>{score.runs ? score.quality : "—"}</div></div>
+                <div style={{ textAlign: "right" }}><div className="faint" style={{ fontSize: 11.5 }}>Is it safe?</div><div style={{ fontSize: 22, fontWeight: 700 }}>{score.grade}</div></div>
+              </div>
+              <hr className="sep" style={{ margin: "8px 0" }} />
+              <div className="faint" style={{ fontSize: 12 }}>
+                {score.can_publish
+                  ? <>Publishable — <Link to={`/agents/${agent.id}?tab=settings`}>Settings → Publish</Link>.</>
+                  : <>Not yet: {score.blocked_by.join("; ")}. Every point comes from a run — <Link to={`/agents/${agent.id}?tab=overview`}>see why</Link>.</>}
+              </div>
+            </Card>
+          </>
+        )}
 
         {readiness && (
           <>

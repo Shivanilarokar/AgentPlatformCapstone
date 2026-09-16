@@ -26,10 +26,11 @@ from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
-from app.builder.schema import AgentConfig, ToolSpec, TopologyType
+from app.builder.schema import Approval, AgentConfig, ToolSpec, TopologyType
 from app.runtime.guarded_tool import RunContext, guarded_tool
 from app.mcp_registry.mcp_client import list_tools
 from app.runtime.models import chat_model, chat_model_with_tools
@@ -119,6 +120,9 @@ async def compile_agent(
         by_call_name = {definitions[r]["function"]["name"]: r for r in granted}
 
         async def worker(state: RunState) -> Command:
+            # Live progress for whoever is watching (the playground's SSE). A
+            # no-op when nobody streams. Never carries tool arguments.
+            tell = get_stream_writer()
             messages: list[Any] = [
                 SystemMessage(f"You are '{name}'. {instructions}"),
                 HumanMessage(
@@ -130,6 +134,7 @@ async def compile_agent(
             results: dict[str, str] = {}
 
             for _ in range(MAX_TOOL_ROUNDS):
+                tell({"kind": "thinking", "worker": name})
                 reply: AIMessage = await bound.ainvoke(messages)
                 messages.append(reply)
 
@@ -144,9 +149,13 @@ async def compile_agent(
                     if ref is None:
                         output = f"No such tool: {call['name']}"
                     else:
+                        tell({"kind": "tool_call", "worker": name, "tool": ref,
+                              "risk": str(by_ref[ref].risk), "asks": by_ref[ref].approval is Approval.ASK})
                         # -- this is where the graph may stop and wait for a human
                         output = await runners[ref](**call["args"])
                         results[ref] = output
+                        tell({"kind": "tool_result", "worker": name, "tool": ref,
+                              "ok": not output.startswith("ERROR"), "summary": _clip(output, 140)})
                     lines.append(f"[{name}] {ref or call['name']} -> {_clip(output)}")
                     messages.append(ToolMessage(content=output, tool_call_id=call["id"]))
 
@@ -166,11 +175,13 @@ async def compile_agent(
 
         async def supervisor(state: RunState) -> Command:
             """A model routes the work. It has no tools of its own, by design."""
+            tell = get_stream_writer()
             remaining = [n for n in order if n not in state["finished"]]
             if not remaining:
                 return Command(goto=END, update={"transcript": ["[supervisor] done"]})
 
             options = "\n".join(f"- {n}: {roster[n].instructions}" for n in remaining)
+            tell({"kind": "thinking", "worker": "supervisor"})
             reply = await llm.ainvoke(
                 [
                     SystemMessage(
@@ -186,6 +197,7 @@ async def compile_agent(
             )
             choice = _text(reply).strip().strip(".`'\"").lower()
             nxt = next((n for n in remaining if n.lower() in choice), remaining[0])
+            tell({"kind": "route", "to": nxt})
             return Command(goto=nxt, update={"transcript": [f"[supervisor] -> {nxt}"]})
 
         builder.add_node("supervisor", supervisor)
