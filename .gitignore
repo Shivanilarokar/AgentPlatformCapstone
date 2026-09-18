@@ -20,3 +20,6 @@ Frontend/dist/
 .vscode/
 .idea/
 *.tmp
+
+# Word lock files (the document is open)
+~$*
