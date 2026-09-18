@@ -344,7 +344,6 @@ table.t tr:last-child td { border-bottom: 0; }
 .gtext  { fill: var(--text);  font: 600 11.5px var(--sans); text-anchor: middle; }
 .gsub   { fill: var(--muted); font: 500 9.5px var(--sans);  text-anchor: middle; }
 .gedge  { stroke: var(--border-2); stroke-width: 1.4; fill: none; }
-.gedgel { fill: var(--faint); font: 500 9.5px var(--mono); text-anchor: middle; }
 
 /* ------------------------------------------------------------------ misc */
 
@@ -363,28 +362,7 @@ table.t tr:last-child td { border-bottom: 0; }
 }
 .note.warn { border-left-color: var(--warn); background: var(--warn-bg); }
 
-.empty {
-  border: 1px dashed var(--border-2); border-radius: var(--radius);
-  padding: 40px 20px; text-align: center; color: var(--muted);
-}
-
-/* ------------------------------------------------------------------ mockup chrome
-   Everything red on these pages is a note to the student, not part of the design. */
-
-.mockbar {
-  background: #9f2119; color: #fdfdfc;
-  padding: 7px 26px; font-size: 12.5px; display: flex; gap: 14px;
-  align-items: center; justify-content: space-between;
-  border-bottom: 1px solid rgba(0,0,0,.15);
-}
-.mockbar a { color: #fff; text-decoration: underline; text-underline-offset: 2px; opacity: .9; }
-.mockbar a:hover { opacity: 1; }
-.mockbar .tag {
-  background: rgba(255,255,255,.2); padding: 2px 8px; border-radius: 4px;
-  font-weight: 700; letter-spacing: .05em; font-size: 10.5px;
-}
-
-/* red requirement callout — "you must build this" */
+/* the red callout on the sign-in page */
 .req {
   border: 1px solid var(--req-br); border-left: 3px solid var(--req);
   background: var(--req-bg); border-radius: 0 8px 8px 0;
@@ -400,25 +378,6 @@ table.t tr:last-child td { border-bottom: 0; }
   content: "▲"; font-size: 8px;
 }
 .req b { color: var(--text); }
-
-/* small red marker that sits next to a UI element */
-.pin {
-  display: inline-grid; place-items: center; vertical-align: middle;
-  min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px;
-  background: var(--req); color: #fff;
-  font: 700 10.5px var(--sans); letter-spacing: .02em;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .pin { color: #2c1715; }
-}
-.anno {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11.5px; font-weight: 600; color: var(--req);
-}
-.reqlist { display: grid; gap: 8px; }
-.reqrow { display: flex; gap: 9px; align-items: flex-start; font-size: 12.8px; }
-.reqrow .t { color: var(--muted); }
-.reqrow .t b { color: var(--text); }
 
 @media (max-width: 860px) {
   .app { grid-template-columns: 1fr; }

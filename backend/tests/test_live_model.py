@@ -20,13 +20,13 @@ from langgraph.types import Command
 from app.builder.schema import AgentConfig
 from app.runtime.compiler import compile_agent
 from app.runtime.guarded_tool import RunContext
-from app.runtime.models import available
+from app.core.config import settings
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "tests" / "fixtures" / "docs_freshness.json"
 
 pytestmark = pytest.mark.skipif(
-    os.environ.get("LIVE_MODEL") != "1" or not available("google_genai"),
+    os.environ.get("LIVE_MODEL") != "1" or not settings.google_api_key,
     reason="set LIVE_MODEL=1 and GOOGLE_API_KEY in .env to run against a real model",
 )
 

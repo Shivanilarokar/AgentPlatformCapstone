@@ -7,14 +7,6 @@
 
 const RISK_CLASS = { read: "", write: "warn", destructive: "danger" };
 
-const STATUS = {
-  live:           { cls: "ok",     label: "live" },
-  draft:          { cls: "",       label: "draft" },
-  pending_review: { cls: "warn",   label: "in review" },
-  published:      { cls: "accent", label: "published" },
-  degraded:       { cls: "danger", label: "degraded" },
-};
-
 export function Badge({ tone = "", dot = false, children }) {
   return (
     <span className={`badge ${tone}`}>
@@ -25,13 +17,6 @@ export function Badge({ tone = "", dot = false, children }) {
 }
 
 export const RiskBadge = ({ risk, label }) => <Badge tone={RISK_CLASS[risk] ?? ""}>{label ?? risk}</Badge>;
-
-export function StatusBadge({ status }) {
-  const s = STATUS[status] ?? STATUS.draft;
-  return <Badge tone={s.cls} dot>{s.label}</Badge>;
-}
-
-export const Chip = ({ children }) => <span className="chip">{children}</span>;
 
 export function Card({ children, style, className = "" }) {
   return <div className={`card ${className}`} style={style}>{children}</div>;
@@ -74,14 +59,6 @@ export function Field({ label, hint, children }) {
       </label>
       {children}
     </div>
-  );
-}
-
-export function Button({ variant = "", size = "", disabled, children, ...rest }) {
-  return (
-    <button className={`btn ${variant} ${size} ${disabled ? "disabled" : ""}`} disabled={disabled} {...rest}>
-      {children}
-    </button>
   );
 }
 

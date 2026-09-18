@@ -43,13 +43,15 @@ with the company you are signed in as.
 |---|---|---|
 | **Signed up** a new company | `platform.tenants`, `platform.users`, Schemas list, Login/Group Roles | a `tenants` row; a `users` row with `role = admin`; a new schema `t_<key>` with 9 tables; a new Postgres role `t_<key>` |
 | **Signed in** | nothing - a JWT in a cookie; `SELECT current_user` inside a request would show `t_<key>` | — |
-| **Registered** an MCP server (Just my workspace) | `t_<co>.mcp_servers`, `t_<co>.mcp_tools` | one server row with `health = ok`, `visibility = private`, `owner_id` = you; N tool rows with `risk` and `input_schema` - every one came from the server's `tools/list` |
-| **Registered** as Everyone (platform admin) | `platform.mcp_servers` / `platform.mcp_tools` | same, in the shared schema |
+| **Registered** an MCP server (Just my workspace) | `t_<co>.mcp_servers`, `t_<co>.mcp_tools` | one server row with `health = ok`, `visibility = private`, `registered_by` = your email (`owner_id` = your id); N tool rows with `risk` and `input_schema` - every one came from the server's `tools/list` |
+| **Registered** as Everyone (platform admin) | `platform.mcp_servers` / `platform.mcp_tools` | same, in the shared schema; a credential given here is used for discovery only and never stored |
+| Company admin clicks **share with company** on a card | `t_<co>.mcp_servers.visibility` | `private` → `company`; every colleague now sees its tools and is asked for their own credential |
+| Build paused at *Pick tools* with **"Not in your registry"** | nothing yet | the design named a server you do not have; *Register it* then *look again* re-runs `understand` against the bigger registry |
 | **Pasted a credential** (Connect / Connect & save) | `t_<co>.connections` | one row: `encrypted_secret` (bytes), `secret_nonce`, `encrypted_data_key`, `data_key_nonce` - **no column contains the token**; `added_by` = your email |
 | Health sweep (every 5 min, or *re-check*) | `mcp_servers.health`, `last_checked_at` | timestamps move; a dead server flips to `down` |
 | **Build** → paused at *Pick tools* | `t_<co>.checkpoints`, `t_<co>.checkpoint_writes` | rows with `thread_id = '<your user id>/build-…'`; **the pause itself** is a `checkpoint_writes` row with `channel = '__interrupt__'` |
 | Build → **restart the API** → reload | same rows, unchanged | that is why the same question is still on screen |
-| Build finished | `t_<co>.agents` | one row: `config` (the whole AgentConfig JSON), `status = draft`, `owner_id` = you |
+| Build finished | `t_<co>.agents` | one row: `config` (the whole AgentConfig JSON), `status = draft`, `created_by` = you |
 | **Playground** run | `t_<co>.runs`; checkpoints under `…/run-…` | `status` `running → ok`; `transcript` (one line per step); `latency_ms` |
 | Playground **paused on Approve / Reject** | `runs.status = awaiting_approval`, `runs.pending` (tool, risk, redacted args); `checkpoint_writes` `__interrupt__` row for that thread | the run is parked; restart the API, the row is still there |
 | Approve / Reject | `runs.status` → `ok` / `rejected`, `pending` → NULL, `output` filled | for a real write: the effect exists outside (GitHub issue, Slack message, `/srv/workspace` file) |
@@ -58,7 +60,7 @@ with the company you are signed in as.
 | **Publish** | `t_<co>.submissions` (`status = pending`, `listing` = the sanitized JSON, `score`); `platform.submission_index` (same, for the admin); `agents.status = pending_review`; checkpoints under `…/pub-…` with an `__interrupt__` row | the run is parked in your company waiting for the admin |
 | Admin **Approve** | `submissions.status = approved`, `notes`; `submission_index.status`; `platform.listings` gets ONE row; `agents.status = live` | nothing else writes `listings` |
 | Admin **Request changes** | `submissions.status = changes_requested`, `notes` | no listing row |
-| Another company **installs** | `t_<other>.agents` new row with `installed_from` = listing id, `owner_id` = installer; `platform.listings.installs + 1` | the publisher's rows untouched; `t_<other>.connections` still empty until they connect |
+| Another company **installs** | `t_<other>.agents` new row with `installed_from` = listing id, `created_by` = installer; `platform.listings.installs + 1` | the publisher's rows untouched; `t_<other>.connections` still empty until they connect |
 | **Download Postman** / mint token | `platform.api_tokens` | `token_hash` (sha256), `prefix`; never the token |
 | Postman **Send** | `t_<co>.runs` with `trigger = api` | — |
 

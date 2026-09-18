@@ -63,6 +63,8 @@ class ServerView:
     shared_by: str
     last_checked_at: datetime | None
     tools: list  # McpTool | SharedTool
+    registered_by: str = ""  # the email of whoever registered it
+    mine: bool = False  # did the signed-in person register it? (they may share or remove it)
 
 
 # --------------------------------------------------------------------- read
@@ -78,6 +80,7 @@ async def list_shared(session: AsyncSession) -> list[ServerView]:
             s.name, s.transport, s.endpoint, s.auth_type, s.description, s.health,
             "everyone", s.shared_by, s.last_checked_at,
             [t for t in shared_tools if t.server_id == s.id],
+            registered_by=s.shared_by,
         )
         for s in shared
     ]
@@ -95,11 +98,12 @@ async def list_servers(session: AsyncSession) -> list[ServerView]:
     me = await session.scalar(text("SELECT NULLIF(current_setting('app.user_id', true), '')::uuid"))
 
     views: dict[str, ServerView] = {v.name: v for v in await list_shared(session)}
-    for s in sorted(mine_or_company, key=lambda s: s.visibility == "company"):  # company first, mine overrides
+    for s in sorted(mine_or_company, key=lambda s: s.visibility != "company"):  # company first, mine overrides
         views[s.name] = ServerView(
             s.name, s.transport, s.endpoint, s.auth_type, s.description, s.health,
             "private" if s.owner_id == me and s.visibility == "private" else "company",
             "", s.last_checked_at, list(s.tools),
+            registered_by=s.registered_by or "", mine=s.owner_id == me,
         )
     return sorted(views.values(), key=lambda v: v.name)
 

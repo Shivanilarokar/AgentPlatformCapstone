@@ -53,6 +53,17 @@ async def bootstrap_platform() -> None:
     async with engine.begin() as conn:
         await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{PLATFORM_SCHEMA}"'))
         await conn.run_sync(PlatformBase.metadata.create_all)
+        # The signed-in person's email, for the *_by columns in every company
+        # table (created_by, run_by, registered_by, ...). Postgres fills them from
+        # the same session variable that row-level security keys on, so a row
+        # in pgAdmin says who without a join and no handler can get it wrong.
+        await conn.execute(text(f"""
+            CREATE OR REPLACE FUNCTION "{PLATFORM_SCHEMA}".current_user_email() RETURNS text
+            LANGUAGE sql STABLE AS $$
+                SELECT email FROM "{PLATFORM_SCHEMA}".users
+                WHERE id = NULLIF(current_setting('app.user_id', true), '')::uuid
+            $$
+        """))
 
 
 async def ensure_platform_admin() -> None:

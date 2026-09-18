@@ -1,18 +1,20 @@
-# Architecture — explained
+# Architecture — as built
 
-Read this before writing any code. Open `docs/architecture.drawio` alongside it (draw.io, or the
-"Draw.io Integration" extension in VS Code). Five pages, one per section below.
+Forge, the Agent Platform Capstone. This is the plain-language version of the system that is
+actually running in the repo today. `docs/DESIGN.md` carries the technical HLD/LLD (diagrams,
+data model, API contract, algorithms); `docs/VERIFY.md` says how to see each claim in the
+database; `GUIDE.md` is how to run it.
 
 ---
 
-## 1. What we are building, in one paragraph
+## 1. What it is, in one paragraph
 
-A user signs in, types *"I want an agent that reads my open GitHub issues every morning and posts a
-summary to Slack"*, and our platform builds that agent, deploys it, and hands them a chat window to
-test it in. When they are happy, they publish it; an admin reviews it; once approved, someone in a
-**different company** can install it into their own workspace **with their own credentials**.
-
-We are not building an agent. We are building **the thing that builds agents**.
+A person signs in, types *"I want an agent that reads my open GitHub issues every morning and
+posts a summary to Slack"*, and the platform builds that agent from the tool servers in their
+registry, deploys it, and gives them a chat window to test it in. A risky action (posting to
+Slack) stops and asks them first. When they are happy they publish; the platform admin reviews;
+once approved, someone in a **different company** installs it into their own workspace **with
+their own credentials**. We did not build an agent. We built the thing that builds agents.
 
 ---
 
@@ -20,468 +22,376 @@ We are not building an agent. We are building **the thing that builds agents**.
 
 > **An agent is a configuration document, not generated code.**
 
-This is Rule 1 in the brief, and it is the decision that makes every other requirement possible.
+The builder writes a JSON document (`AgentConfig`, `backend/app/builder/schema.py`). One runtime
+(`backend/app/runtime/compiler.py::compile_agent`) reads it and assembles a LangGraph graph from
+it. No Python is ever generated. That single decision is why:
 
-The obvious approach — "the user describes an agent, an LLM writes Python, we save the file and run
-it" — fails three ways at once:
+- **we** decide where a run stops for approval — the agent has no say (Rule 4);
+- the document can be validated, scored, sanitized and copied to another company (Rule 5/6);
+- the graph picture on the agent page is *drawn from* the document, so it cannot go stale.
 
-| Problem | Why it is fatal here |
-|---|---|
-| You cannot safely hand generated Python to another company | Rule 6 of the brief *requires* cross-company installation |
-| You cannot force generated code to ask permission | The code would have to be *trusted* to ask. Rule 4 says the platform must enforce it |
-| You cannot version, score, diff or explain it | Rule 6 requires scores you can point at, and grading requires explainability |
-
-Splitting it into **"a config document" + "one runtime that reads config documents"** fixes all
-three simultaneously:
-
-- the **runtime is ours**, so *we* decide where it stops for approval — the agent has no say
-- the **config is just data**, so it can be versioned, scored, sanitized and shipped elsewhere
-- the graph picture on the agent page is *rendered from the config*, so it can never be out of date
-
-Everything else in this document is a consequence of that one sentence.
-
-### The document itself
+### The document, as the builder writes it today
 
 ```jsonc
 {
   "schema_version": "1.0",
-  "name": "Issue Digest",
-  "description": "Triages open GitHub issues by severity and posts a morning digest to Slack.",
-  "model": { "provider": "google_genai", "name": "gemini-2.5-flash", "temperature": 0 },
-
+  "name": "GitHub Issue Daily Summary",
+  "description": "Reads open GitHub issues every morning and posts a summary to Slack.",
+  "model": { "provider": "google_genai", "name": "gemini-flash-lite-latest", "temperature": 0 },
   "topology": {
     "type": "supervisor",                       // "single" | "supervisor"
-    "supervisor": { "instructions": "...", "delegates_to": ["triager", "reporter"] },
+    "supervisor": { "instructions": "Send the work to the collector first, then hand what it found to the poster.",
+                    "delegates_to": ["collector", "poster"] },
     "specialists": [
-      { "name": "triager",  "instructions": "...", "tools": ["github.list_issues"] },
-      { "name": "reporter", "instructions": "...", "tools": ["slack.post_message"] }
+      { "name": "collector", "instructions": "Gather the open issues and hand back a clear summary.", "tools": ["github.list_issues"] },
+      { "name": "poster",    "instructions": "Post what the collector found, exactly once.",           "tools": ["slack.slack_send_message"] }
     ]
   },
-
   "tools": [
-    { "ref": "github.list_issues", "risk": "read",  "approval": "auto", "requires_connection": "github" },
-    { "ref": "slack.post_message", "risk": "write", "approval": "ask",  "requires_connection": "slack" }
+    { "ref": "github.list_issues",       "risk": "read",  "approval": "auto", "requires_connection": "github" },
+    { "ref": "slack.slack_send_message", "risk": "write", "approval": "ask",  "requires_connection": "slack" }
   ],
-
   "policy": { "approval_required_for": ["write", "destructive"], "max_tool_calls": 25 },
   "requires_connections": ["github", "slack"],
   "schedule": null
 }
 ```
 
-**Three invariants. Learn these; they come up in every design conversation for the next two weeks.**
+**Three invariants, enforced by the Pydantic model itself:**
 
-**(a) `requires_connection` names a server *name*, never a connection id and never a token.**
-This one line is the entire reason a marketplace can exist. The config says *"this needs a Slack
-connection"* — it does not say *which* one. At run time the runtime resolves
-`server name + whoever is running this → their connection row`. Northwind's config, installed by Helios,
-transparently uses Helios's token.
-
-**(b) `approval` is never trusted from the config.** On save and again on every run, the platform
-recomputes it from the registry's recorded risk:
-
-```
-risk ∈ {write, destructive}  ⇒  approval = "ask", always
-```
-
-A config claiming `"approval": "auto"` on a write tool is rejected at save and blocked at publish.
-That is graded check 3.
-
-**(c) The config is the only thing that travels.** Nothing else is copied to the marketplace, and
-nothing else is needed to reconstruct the agent.
+- **(a)** `requires_connection` names a server *kind* (`"slack"`), never a connection id and never a
+  token. The config says *what it needs*, not *whose*. At run time the runtime resolves
+  `server name + whoever is running it → their own connection row`. That is why a marketplace can
+  exist at all.
+- **(b)** `approval` is never trusted. A write/destructive tool with `approval: auto` is rejected by
+  the validator, and `assemble()` in the builder recomputes it from the **registry's** risk marking
+  anyway. Graded check 3.
+- **(c)** A token-shaped string cannot even enter the document (`SECRET_SHAPES` validator). The config
+  is the only thing that ever travels to another company.
 
 ---
 
-## 3. The five boxes
+## 3. The boxes
 
-*(draw.io page 1)*
+![Deployable units](img/containers.png)
+
+Four containers from one `docker compose up`:
+
+| Container | What it is | Port |
+|---|---|---|
+| `db` | PostgreSQL 16 — the only state: every schema, every LangGraph checkpoint | 5432 |
+| `api` | FastAPI + Uvicorn; the builder graph, the runtime, the registry client, the vault; launches stdio MCP servers as subprocesses | 8000 |
+| `frontend` | React 18 + Vite dev server; proxies `/auth` and `/v1` to the API | 5173 |
+| `pgadmin` | a browser for the database, for humans | 5050 |
+
+Inside `api`, the pieces:
+
+![Inside the API](img/components.png)
 
 ```
 Browser (React SPA)
-   │  Bearer JWT { user_id, tenant_id, role }
+   │  httpOnly cookie with a JWT { user_id, tenant_id, tenant_key, email, role }
    ▼
-FastAPI  ──►  tenant dependency: SET LOCAL search_path = t_<tenant>, platform
+FastAPI routers  ──►  the tenant gate  (core/db.py::_point_at — SET LOCAL ROLE + search_path + app.user_id)
    │
-   ├── Registry service   connects to an MCP server, asks it for its tools
-   ├── Vault              encrypts/decrypts connection tokens
-   ├── Builder graph      chat  → config document      (2 pauses)
-   └── Runtime compiler   config → live LangGraph      (approval gate)
+   ├── mcp_registry/   catalogue · mcp_client (initialize, tools/list, tools/call) · risk · registry · health
+   ├── vault/          envelope (AES-256-GCM) · connections (add / use) · resolver
+   ├── builder/        schema (AgentConfig) · graph (the two pauses)
+   ├── runtime/        compiler (config → LangGraph) · guarded_tool (the approval gate) · models (Gemini)
+   ├── scoring/        score (six quality checks, five safety booleans)
+   └── publishing/     sanitize (allowlist projection + scrub) · graph (admin_review pause)
                              │
-                          Postgres:  platform schema + one schema per company
+                          Postgres:  platform schema + one schema per company (t_<key>)
 ```
 
-**Only two of these are real programs: the Builder graph and the Runtime compiler.** The registry is
-an HTTP client plus a table. The vault is forty lines of `cryptography`. The API is CRUD. Say this
-in the presentation — it shows you understand where the difficulty actually is.
-
-**Data flows one way:** SPA → FastAPI → Registry/Builder → Postgres → Runtime.
+Only two of these are real programs: the **builder graph** and the **runtime compiler**. The rest is
+a protocol client, forty lines of cryptography, and CRUD over a database.
 
 ---
 
-## 4. Tenant isolation — why schema-per-tenant
+## 4. People, companies, roles
 
-*(draw.io page 2)*
-
-The brief is unusually specific here:
-
-> Do not enforce this by remembering to add a filter to every query. One forgotten filter is a data
-> breach. **How this is tested: we delete your application-level check and try again.**
-
-So any design where the answer is *"we're careful to write `WHERE tenant_id = ...`"* fails by
-definition. There were two real candidates.
-
-| | Row-Level Security | **Schema-per-tenant (chosen)** |
+| Role | How you get it | What it can do |
 |---|---|---|
-| How | Policies in the DB filter every row by a session variable | One Postgres schema per company; `search_path` picks which one |
-| Survives filter deletion? | Yes | Yes |
-| Migrations | One set of tables | **Must run across every schema** — the real cost |
-| LangGraph checkpoints | **Hole** — see below | Solved for free |
+| `platform_admin` | created at startup from config (`PLATFORM_ADMIN_EMAIL/PASSWORD`, default `admin@forge.dev`); exactly one; cannot be created by sign-up | share servers with **everyone**; review marketplace submissions. Has no company and no workspace — Build / My Agents / Connections answer 404 |
+| `admin` | sign-up with **Create a new company** — the first person *is* the admin | everything a user can, plus **share a server with the whole company** (and take it back) |
+| `user` | sign-up with **Join an existing company** (the name must match) | register servers for themselves, connect credentials, build, test, publish, install |
 
-### The deciding factor: LangGraph checkpoint tables
+"Company", "workspace" and "tenant" are the same thing: one Postgres schema. Inside a company every
+person works alone by default (next section); the admin's only extra power is sharing a server.
 
-LangGraph stores paused graph state in `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`. Those
-tables are keyed by **`thread_id` only**. They have no `tenant_id` column, so an RLS policy has
-nothing to filter on — a guessed or leaked thread id would read another company's paused run, which
-is exactly where approval payloads and tool arguments live.
+Known gap, on purpose for the capstone: joining needs only the company name. The production answer
+is an invite link from the admin; nothing in the isolation below depends on it.
 
-With schema-per-tenant, each company's checkpoint tables sit **inside that company's schema** and are
-unreachable from another `search_path`. The hole closes by itself. This is the strongest single
-argument for the choice, and it is the answer to give if a grader asks "what about the checkpointer?"
+---
 
-### How the switch works
+## 5. Isolation — two locks, set on the connection, never written into a query
 
-One FastAPI dependency, and only one:
+![Two locks](img/isolation.png)
+
+The brief: *"we delete your application-level check and try again."* So there is no
+application-level check. Every request that touches company data passes through one function,
+`core/db.py::_point_at`, which runs three statements inside the request's transaction:
+
+```sql
+SET LOCAL ROLE "t_northwind_labs";                          -- lock 1: the company
+SET LOCAL search_path TO "t_northwind_labs", platform;
+SELECT set_config('app.user_id', '<uuid of the person>', true);  -- lock 2: the person
+```
+
+**Lock 1 — company = schema + role.** Every company gets a schema `t_<key>` with its own copy of
+`agents, runs, submissions, connections, mcp_servers, mcp_tools` and LangGraph's
+`checkpoints, checkpoint_blobs, checkpoint_writes` — plus a Postgres **role of the same name** that
+has `USAGE` on that schema and read access to the shared `platform` tables, nothing else. Handlers
+write `select(Agent)` with no `WHERE tenant_id`; the bare table name can only resolve inside the
+company's schema, and a query that names another company's schema is *permission denied*.
+
+**Lock 2 — person = row-level security.** `agents, runs, submissions, connections, mcp_servers` (and
+`mcp_tools` via its server) have `ENABLE + FORCE ROW LEVEL SECURITY` and one policy:
+`owner_id = current_setting('app.user_id')` — servers add `OR visibility = 'company'`. `owner_id`
+*defaults* to that setting, so no handler passes an owner, and `WITH CHECK` refuses a row that claims
+someone else's id. A session that names no person sees zero rows. The app connects as `forge_app`
+(`NOSUPERUSER NOBYPASSRLS`, created by `docker/db/init.sql`) because a superuser bypasses RLS silently
+— a real bug this project hit and fixed.
+
+Next to every `owner_id` there is a readable twin (`created_by`, `run_by`, `submitted_by`,
+`registered_by`, `added_by`) filled by Postgres from the same session variable through
+`platform.current_user_email()`, so a row in pgAdmin says *who* without a join.
+
+**LangGraph threads.** Checkpoint tables are keyed by `thread_id` only and have no owner column, so
+the owner is put *into* the key: `<user_id>/build-…`, `<user_id>/run-…`, `<user_id>/pub-<submission>`.
+A colleague pasting your build id addresses a thread that does not exist.
+
+**Check 9 falls out.** Another company asking for your agent id gets zero rows → `404`, with a body
+byte-identical to an unknown id. There is no ownership branch that could say 403.
+
+**The two deliberate exceptions.** The health sweep runs with `app.role = 'system'` so it can
+re-check every server in a schema; it never runs from a request. The platform admin's decision on a
+submission is applied in the author's schema through the same system setting, routed by
+`platform.submission_index` — the brief's "single deliberate exception, which is exactly why an admin
+guards it".
+
+---
+
+## 6. The registry — three layers, nearest wins
+
+![Registry layers](img/registry.png)
+
+What a person sees in **MCP Registry** is assembled per request by
+`mcp_registry/registry.py::list_servers`:
+
+| Layer | Who put it there | Where | Who sees it |
+|---|---|---|---|
+| Everyone | platform admin | `platform.mcp_servers` | every person in every company |
+| Whole company | the company admin (*share with company* on a card they registered) | `t_<co>.mcp_servers`, `visibility = company` | everyone in that company |
+| Just me | anyone | `t_<co>.mcp_servers`, `visibility = private`, `owner_id = me` | only me |
+
+Same name in two layers → the nearer one wins (mine > company > everyone).
+
+Registering is never typing tool names. `registry.register()` parses the endpoint, opens a real MCP
+session (`mcp_client.py`: stdio subprocess, streamable HTTP, or SSE), sends `initialize`, calls
+`tools/list`, and stores exactly what came back — name, description, input schema — each marked by
+`risk.py::classify_risk`: a destructive verb anywhere → `destructive`; a read verb as the first word
+→ `read` (`list_commits` lists, it does not commit); a write verb anywhere → `write`; else `read`. A
+server that does not answer is not saved. The remote servers (GitHub `api.githubcopilot.com/mcp/`,
+Slack `mcp.slack.com/mcp`, Atlassian `mcp.atlassian.com/v2/mcp`) refuse an anonymous `tools/list`, so
+the form asks for a credential, discovers with it, and — for a company user — saves it as their
+connection in the same click. A background task re-checks every server every five minutes and flips
+`health` to `down` if it stops answering.
+
+Live tool counts today: filesystem 14 (10 read / 4 write), git 12 (7 / 4 / 1 destructive: `git_reset`),
+sqlite 6 (3 / 3), GitHub 45 (28 / 16 / 1), Slack 14 (8 / 6).
+
+---
+
+## 7. Credentials — in once, then gone
+
+`vault/envelope.py::seal`: a fresh 256-bit data key per row encrypts the token with AES-GCM; that data
+key is itself encrypted under `FORGE_MASTER_KEY`; both nonces and a `master_key_version` are stored.
+The GCM **AAD** is `company:user_id:server_name`, so a ciphertext row copied to another schema,
+another person, or relabelled as another server refuses to decrypt.
+
+The plaintext exists in exactly one function, `vault/connections.py::use()`, called by the tool wrapper
+right before a call, by the registry re-check, and by the health sweep — and `del`'d after. The
+`ConnectionOut` model's `secret` field is a constant string of dots: the API has nowhere to put a
+secret. Graph state carries server *names*, tool arguments are logged through `redact()`, and the MCP
+client never echoes headers into an error.
+
+Connections are **per person**. Two colleagues each bring their own Slack token.
+
+---
+
+## 8. The builder — one graph, two pauses
+
+![Builder graph](img/builder.png)
+
+`builder/graph.py`, a LangGraph `StateGraph` checkpointed into the company's schema:
+
+```
+understand → search_registry ⏸ select_tools → check_connections → ask_for_connection ⏸ missing_connection → assemble → persist
+                  ▲                  │
+                  └── "look again" ──┘   (resume {"action": "rescan"} after registering a server the design needed)
+```
+
+- **understand** — one structured model call (`Draft`). The catalogue it may choose from is *this
+  person's* registry, loaded from the database first; a ref that is not in it is dropped. It returns
+  the name, description, the minimum tools, specialists with their instructions, and **`unmet`** —
+  parts of the request no registered server can do. A job that reads and then writes is always split
+  into coordinator + collector + poster, so the worker that holds the write tool holds nothing else.
+- **⏸ select_tools** — always. Shows the design with the suggested tools ticked and the full
+  catalogue behind "show all". If something was unmet: *"Not in your registry: jira — to create the
+  tickets → Register it → look again"*. The build never quietly shrinks.
+- **check_connections** — which servers the chosen tools need, which of those this person holds an
+  active connection for. A server with `auth_type = none` is never missing.
+- **⏸ missing_connection** — only when something is missing: *Connect slack / I have connected it /
+  Skip*. "I have connected it" re-checks rather than believes.
+- **assemble** — writes the document. Risk and approval come from the registry rows, never from the
+  model or the user. Validated by `AgentConfig` before it goes anywhere near the database.
+- **persist** — `INSERT INTO agents`; Postgres stamps `owner_id` and `created_by`.
+
+While paused nothing is running: the build is a `checkpoint_writes` row with
+`channel = '__interrupt__'`. Restart the API, reload the URL, the same card is there (check 5). The
+**form mode** (`POST /v1/builds/form`) drives this same graph with the answers pre-seeded — the
+builder is not written twice.
+
+---
+
+## 9. The runtime — where approval is actually enforced
+
+![Runtime](img/runtime.png)
+
+`runtime/compiler.py::compile_agent(config)` builds the graph from the document: a supervisor node
+that routes (a model with no tools of its own, by design) and one node per specialist bound only to
+its own tools — or a single agent node. Every tool is `runtime/guarded_tool.py`:
 
 ```python
-async def tenant_session(claims = Depends(current_user)) -> AsyncSession:
-    async with SessionLocal() as s, s.begin():          # a transaction
-        await s.execute(text(f"SET LOCAL search_path = {schema_for(claims.tenant_id)}, platform"))
-        yield s                                          # every handler gets this
+async def _run(**kwargs):
+    if spec.approval is Approval.ASK:                       # set at build time from the registry's risk
+        decision = interrupt({"type": "tool_approval", "tool": spec.ref, "risk": ..., "args": redact(kwargs)})
+        if decision != "approve":
+            return f"Rejected by the user. {spec.ref} was not executed."
+    ep = await ctx.resolve_endpoint(spec.requires_connection)   # this person's registry
+    token = await ctx.resolve_token(spec.requires_connection)   # vault.use(): this person's credential
+    try:
+        return await call_tool(ep, name, kwargs, token)
+    finally:
+        del token
 ```
 
-After that line, handlers write:
+The model does not call tools; it calls this wrapper. A missing or expired credential returns an
+error *string* so the agent finishes the rest of its job and reports the broken tool (*degraded*,
+not crashed). Progress (`thinking`, `route`, `tool_call`, `tool_result`) is emitted through
+`get_stream_writer()` and reaches the Playground over SSE as it happens. Before a run, the Playground
+asks `/readiness` and, if a connection is missing, asks for it instead of running degraded.
 
-```python
-agents = await s.scalars(select(Agent))       # note: no WHERE tenant_id, anywhere
-```
-
-**There is no filter to delete**, so deleting it changes nothing. That is check 1.
-
-### Three things that will break it
-
-1. **`SET LOCAL` only lives inside a transaction.** Use the dependency above; never take a bare
-   connection from the pool.
-2. **Never schema-qualify a tenant table** (`t_helios.agents`). One such query defeats the whole
-   design. Add a CI grep on day 2 that fails the build on `t_` inside a SQL string or a SQLAlchemy
-   `schema=` argument.
-3. ~~The app role has `USAGE` on every tenant schema~~ — closed. Every company gets a Postgres
-   role named after its schema (`t_northwind_labs`) with `USAGE` on that schema and read access to
-   the shared platform tables, nothing else. The gate runs `SET LOCAL ROLE "t_<company>"` before
-   `search_path`, so even a schema-qualified query for another company is *denied*, not answered.
-
-### The second layer: one PERSON cannot see a colleague's things
-
-Rule 2 is worded per person, not per company ("my agents, my connections, my runs — mine"). The
-schema handles companies; inside a company the same trick is repeated one level down with
-Postgres **row-level security**:
-
-- `agents`, `connections` and `mcp_servers` carry an `owner_id`.
-- The gate runs `set_config('app.user_id', <uuid>)` next to `SET LOCAL search_path`.
-- Each table has `ENABLE + FORCE ROW LEVEL SECURITY` and one policy:
-  `owner_id = current_setting('app.user_id')` (servers also allow `visibility = 'company'`).
-- `owner_id` has `DEFAULT current_setting('app.user_id')`, so no handler passes an owner, and the
-  policy's `WITH CHECK` refuses a row that claims someone else's id.
-
-Handlers still write `select(Agent)` with nothing to filter on. Two things make this real rather
-than decorative: the app connects as `forge_app`, a role with `NOSUPERUSER NOBYPASSRLS` (a superuser
-skips RLS silently), and a session that forgets to name a person sees **zero** rows, not all rows.
-
-The single deliberate exception is the health sweep, which sets `app.role = 'system'` to see every
-server in a schema; it never runs from a request.
-
-**Build threads.** LangGraph's checkpoint tables are keyed by `thread_id` and have no owner column,
-so the owner is put *into* the key: `<user_id>/<build id>`. A colleague who pastes my build id
-addresses `<their id>/<my id>` — a thread that does not exist. There is no ownership check in the
-handler to forget.
-
-### Check 9 falls out for free
-
-Tom at Helios asks for Priya's agent id. It simply is not in `t_helios`. The query returns zero rows,
-so the natural handler is:
-
-```python
-if not agent:
-    raise HTTPException(404)
-```
-
-There is no ownership branch, so there is no way to accidentally return 403. A 403 would confirm the
-agent exists. Return a **byte-identical** 404 body for unknown, malformed and cross-tenant ids.
-
-### What is deliberately shared
-
-`platform` schema: `tenants`, `users`, `api_tokens`, global MCP servers, and **`listings`** — the
-marketplace. The brief calls the marketplace "the single deliberate exception — which is exactly why
-an admin guards it."
-
-One extra table earns its place: `platform.submission_index(submission_id, tenant_id, agent_id,
-thread_id, status)`. An admin has to resume a publish run that is parked in *someone else's* schema,
-so the queue needs a cross-tenant index to route each decision to the right tenant's checkpointer.
+The same `compile_agent` serves the Playground and the public `/v1` API. There is no second path.
 
 ---
 
-## 5. Credentials — in once, then gone
+## 10. Scores that mean something
 
-The test is blunt: *"we search everything your system stored for the token we gave you. Finding it
-anywhere is a fail."*
+![Scores](img/scoring.png)
 
-**Encryption.** AES-256-GCM per connection, data key wrapped by a master key from `FORGE_MASTER_KEY`,
-with a `master_key_version` column for rotation. Use `tenant_id || server_id` as the GCM **AAD** — so a
-encrypted_secret row copied into another schema simply refuses to decrypt. Cheap to build, strong to say.
+`scoring/score.py`, from rows only — never a model. Every check is stored on the agent
+(`agents.checks`) with its reason, and the Overview shows all of them.
 
-**Lifecycle, enforced in exactly one function:**
+**Quality 0–100 — "does it work?"** — 20 run at least once · 30 success rate over the last 20 ·
+20 thumbs-up ratio · 15 every granted tool used · 10 median latency under 90 s (the agent's own
+time, not the human's approval wait) · 5 no error in the last 5.
 
-```python
-# vault.use() is the ONLY place a plaintext token exists in this codebase.
-token = vault.use(tenant_id, server_slug)     # decrypt
-try:
-    return await mcp_call(spec, kwargs, token)  # use
-finally:
-    del token                                    # drop
-```
+**Safety A–D — "is it set up safely?"** — five booleans: write/destructive tools ask · every
+referenced server registered, healthy and still has the tool · nothing credential-shaped in config
+or traces · no granted tool left unused · run at least once. 5 = A, 4 = B, 3 = C, else D.
 
-**Where teams lose this check.** The checkpointer writes graph state to Postgres so runs can resume.
-A token that lands in graph state even once is now permanently on disk, in a table you forgot about.
-So:
-
-- graph state carries a **server name**, never a value
-- tool arguments are logged from an **allowlist of keys**, never `repr(kwargs)`
-- the MCP client never echoes request headers into an error message
-- `runs.outcome` stores a summary string, never a raw tool response
-
-**Revoking must degrade, not crash.** If a connection is missing or expired, the wrapper returns an
-error *string* to the model ("slack connection expired — cannot post"). The agent finishes its other
-work and reports the broken tool. Status renders as `degraded`.
+**The gate:** quality ≥ 70 **and** B or better. Below it the Publish button is disabled and names the
+failing check; the API answers `409 score_too_low`. An agent with an unguarded write tool cannot
+pass check 1 of safety, so it cannot be published (graded check 3).
 
 ---
 
-## 6. The Builder graph — the two pauses
+## 11. Publishing and the marketplace
 
-*(draw.io page 3)*
+![Publish and install](img/publish.png)
 
-```
-understand → search_registry → [⏸ interrupt: select_tools]
-           → check_connections → [⏸ interrupt: missing_connection]?
-           → assemble_config → score → persist
-```
+Publish starts a second graph, `publishing/graph.py`: `sanitize → ⏸ admin_review → decide`.
 
-The brief: *"Those two moments where it stops and waits for me are the centre of this project."*
+**Sanitize by allowlist.** `sanitize.py::listing_from` copies *only named fields* — name,
+description, model, topology (instructions included), tool refs with risk/approval/connection,
+policy, required server names, schedule — and runs `scrub()` over every free-text field: emails,
+URLs, `*.internal/.local/.corp` hosts, IPs, filesystem paths, `ABC-1234` ticket refs, long
+secret-shaped strings, and the company's own name. Anything planted in a field that is not named
+never exists on the other side (check 4). The author sees exactly this projection before confirming.
 
-**`interrupt("select_tools")`** — we search `mcp_tools` (global + this company's private servers) and
-show the servers we think are needed. The user ticks boxes. The graph resumes with
-`Command(resume=chosen_refs)`.
+The sanitized listing is frozen in `t_<co>.submissions`; a pointer row goes to
+`platform.submission_index` (company, thread id, score); `agents.status = pending_review`; the graph
+parks. It may sit for days across restarts — the pause is a checkpoint row in the author's schema
+(check 6). The platform admin's **Admin Review** shows the listing, the tools and every check, and
+resumes the parked thread with *approve / request changes / reject* and notes. `Listing(` is
+constructed in exactly one place, the graph's `decide` node — a test asserts it.
 
-**`interrupt("missing_connection")`** — fires only when a required server has no active connection.
-Resumes on "Connect Slack" or on "Skip — build without posting", which drops that tool from the
-config.
-
-**Why these survive a restart.** Both use `interrupt()` from `langgraph.types`, and the graph is
-compiled with `AsyncPostgresSaver`. After every node the entire graph state is written to Postgres
-against a `thread_id`. Close the tab, kill the container, come back tomorrow — resuming that thread
-picks up at exactly that node. That is check 5, and the same mechanism is check 6.
-
-**The form mode does not get its own code path.** The mockup is explicit: *"Both paths must produce
-the same agent configuration — do not write the builder twice."* The form invokes this same graph
-with the answers pre-seeded so both interrupts resolve immediately.
+**Install.** `POST /v1/listings/{id}/install` re-validates the sanitized JSON as an `AgentConfig` and
+inserts it into the *installer's* schema as a new `agents` row (`installed_from` set); RLS stamps the
+owner; `listings.installs` increments. Because the config names servers by kind, it resolves to the
+installer's own credentials at run time. The publisher's agent, runs and tokens are untouched and
+unreachable.
 
 ---
 
-## 7. The Runtime — where approval is actually enforced
+## 12. Every agent gets an endpoint
 
-*(draw.io page 4)*
-
-One function, `compile_agent(config) -> CompiledGraph`, cached by config hash. **It is the only code
-in the system that ever runs an agent** — the playground and the public `/v1` API both call it, so
-there is no second path where a control could be missing.
-
-- `topology.type == "single"` → agent node + tool node
-- `topology.type == "supervisor"` → supervisor routes to specialists via `Command(goto=…)`, each
-  specialist holding only its own tools, handing back to the supervisor
-
-### The guarded tool wrapper
-
-```python
-def guarded_tool(spec, ctx):
-    async def _run(**kwargs):
-        if spec.risk in ("write", "destructive"):
-            decision = interrupt({
-                "type": "tool_approval",
-                "tool": spec.ref, "risk": spec.risk,
-                "args": redact(kwargs),
-            })
-            if decision != "approve":
-                return f"Rejected by the user. {spec.ref} was not executed."
-        token = vault.use(ctx.tenant_id, spec.requires_connection)
-        try:
-            return await mcp_call(spec, kwargs, token)
-        finally:
-            del token
-    return _run
-```
-
-**This is the sentence to say out loud in the presentation:**
-
-> The approval is enforced by this wrapper, not by text in the agent's instructions. Putting
-> *"always ask before posting"* in a prompt is a **suggestion**, and models do not always follow
-> suggestions. This is a **control**: the tool physically cannot execute before a human answers.
-
-That distinction is Rule 4, and they will ask about it.
+`POST /v1/agents/{id}/invoke`, `/stream` (SSE), `/runs/{run}/resume`, `GET /readiness`, `/runs`,
+`/postman`. A `forge_…` API token (sha256 hash in `platform.api_tokens`, plaintext shown once)
+resolves to its owner in the same `current_user` dependency the cookie does, so the same handlers
+serve the Playground and Postman. **Download Postman collection** mints a token and embeds it in a
+v2.1 collection with `base_url`, `agent_id` and `run_id` variables — import, open *Invoke*, Send,
+get a real response (check 8). Another company's token asking for this agent gets 404.
 
 ---
 
-## 8. Scores that mean something
+## 13. The screens, and what each one writes
 
-Two numbers, both computed from checks you can point at. Every check writes a row to `agent_checks`,
-so the UI can show *why* — the brief forbids asking a model to guess a score.
-
-**Quality, 0–100 — "does it work?"**
-
-| Weight | Check |
-|---|---|
-| 20 | run at least 5 times in the playground |
-| 30 | success rate over the last 20 runs |
-| 20 | thumbs-up ratio |
-| 15 | every granted tool used at least once |
-| 10 | median latency under threshold |
-| 5 | no unhandled error in the last 5 runs |
-
-**Safety, A–D — "is it set up safely?"** Five booleans: writes behind approval · servers healthy ·
-no credential-shaped string in config or traces · no granted-but-unused tools · tested at least N
-times. 5/5 = A, 4/5 = B, 3/5 = C, else D.
-
-**The gate: `quality ≥ 70 AND safety ≥ B`.** Below that the Publish button is **disabled and names
-the failing check**. The brief: *"A score that blocks nothing is decoration."*
-
----
-
-## 9. Publishing and the marketplace
-
-*(draw.io page 5)*
-
-Publishing starts a **second LangGraph**: `sanitize → [⏸ admin_review] → list_or_return`.
-
-The admin queue **is** that graph, parked on an interrupt. It may wait three days across two deploys
-and a weekend. Approve, Request changes and Reject all resume the *same* parked run.
-
-### Sanitize by allowlist, never by denylist
-
-Build the listing by **copying only these fields**: name, description, topology shape, tool refs +
-risk + approval, required server names, score, grade, publisher **org name only**.
-
-Nothing else is copied — so confidential material planted in any field we did not name **cannot
-escape, by construction**. A denylist ("strip anything that looks secret") loses this test the moment
-the grader plants something you did not think of.
-
-The residual risk is free text: `description` and `instructions`, which the agent is useless without.
-We publish them, run a scrubber over them (internal hostnames, emails, long high-entropy strings) and
-**show the author a diff to confirm before submission**. The allowlist is what passes the check; the
-scrubber is belt-and-braces.
-
-### Install
-
-The sanitized config is copied into the installer's schema as a brand-new `agents` row, and they are
-walked through connecting each required server with **their own** credentials. They never touch the
-original; the publisher never sees their runs.
-
----
-
-## 10. Every agent gets an endpoint
-
-| Endpoint | Purpose |
-|---|---|
-| `POST /v1/agents/{id}/invoke` | run it |
-| `POST /v1/agents/{id}/stream` | same, over SSE |
-| `POST /v1/agents/{id}/resume` | answer a pending approval |
-| `GET  /v1/agents/{id}/postman` | the collection, as JSON |
-
-Bearer token → `platform.api_tokens` → tenant → `SET LOCAL search_path` → the agent is in that schema
-or it is not. Another company's token gets **404**.
-
-Check 8 is about the download *actually working*: generate a Postman v2.1 collection server-side with
-`{{base_url}}` and `{{token}}` variables **pre-filled with the caller's own token and the running base
-URL**, so "download it, hit Send, get a response" is literally true.
-
----
-
-## 11. Glossary — terms that will come up daily
-
-| Term | What it means here |
-|---|---|
-| **MCP** | Model Context Protocol. A standard way for a tool server to describe and expose its tools. We call `tools/list` to discover them and `tools/call` to run one. Nobody types a tool name by hand. |
-| **Risk** | Our marking on each discovered tool: `read`, `write`, `destructive`. It is the input to the approval gate. |
-| **Connection** | One company's encrypted credential for one server. Never named in a config. |
-| **Interrupt** | LangGraph's pause. `interrupt(payload)` stops the graph and persists it; `Command(resume=value)` continues, and `interrupt()` returns that value. |
-| **Checkpointer** | Where paused graph state is stored. We use `AsyncPostgresSaver`, per tenant schema. |
-| **Thread id** | The handle for one paused or ongoing run. Always resolve it through our own tables first; never hand a user-supplied one straight to the checkpointer. |
-| **`search_path`** | The Postgres setting that decides which schema an unqualified table name resolves to. Our entire tenant isolation. |
-| **Topology** | `single` or `supervisor`. Rule 8 requires at least one real `supervisor` agent built through the platform. |
-
----
-
-## 12. How each graded check is satisfied
-
-| # | Check | Where it is handled |
+| Screen | Route | Writes |
 |---|---|---|
-| 1 | Isolation with the app filter removed | §4 — schema per tenant; there is no filter |
-| 2 | Credential appears nowhere | §5 — envelope encryption, server name only in graph state |
-| 3 | Unguarded write tool cannot be published | §2(b) + §8 — approval recomputed from risk, publish gate |
-| 4 | Planted material does not survive publication | §9 — allowlist projection |
-| 5 | Killing the server mid-build resumes | §6 — `interrupt()` + `AsyncPostgresSaver` |
-| 6 | Approval left overnight still resumes | §9 — admin review is a parked graph |
-| 7 | Playground runs the multi-agent demo | §7 — supervisor topology, approval in the wrapper |
-| 8 | Postman collection gets a real response | §10 — server-generated, token pre-filled |
-| 9 | Another company's agent id does not reveal it | §4 — 0 rows → 404, no ownership branch |
+| Sign in / Sign up | `/signin` | `platform.tenants` + `CREATE SCHEMA` + role (create), `platform.users` |
+| MCP Registry | `/registry` | `mcp_servers`, `mcp_tools` (from `tools/list`); a credential given at registration → `connections` |
+| Connections | `/connections` | `connections` (sealed), revoke wipes the ciphertext |
+| Build | `/build` | `checkpoints*` while paused; `agents` at the end |
+| My Agents | `/agents` | — |
+| Agent · Overview / Playground / Connections / Runs / API / Settings | `/agents/:id?tab=` | `runs` (+ `pending` while parked), `runs.feedback`, `agents.quality_score/safety_grade/checks`, `platform.api_tokens`, `submissions` + `platform.submission_index` |
+| Admin Review (platform admin) | `/review` | `submissions.status/notes`, `submission_index.status`, `platform.listings`, `agents.status` |
+| Marketplace | `/marketplace`, `/marketplace/:id` | installer's `agents` row, `listings.installs` |
 
 ---
 
-## 13. This is a real product, not a mockup
+## 14. How each graded check is satisfied
 
-The published screens are reference mockups driven by a fixtures file (`assets/data.js`). We take
-their **behaviour and layout** and throw the fixtures away.
+| # | Check | Mechanism | Test |
+|---|---|---|---|
+| 1 | Isolation with the app filter removed | schema + role per company; RLS per person; no filter exists | `graded/test_check_01_isolation.py`, `test_no_schema_qualified_queries.py` |
+| 2 | Credential appears nowhere | envelope encryption; server names only in state; `redact()` | `graded/test_check_02_credentials.py` |
+| 3 | Unguarded write cannot be published | validator + `assemble()` recompute approval from risk; safety check 1; `409` at publish | `test_agent_config.py`, `graded/test_form_and_chat_agree.py` |
+| 4 | Planted material does not survive | allowlist projection + scrub | `graded/test_check_04_sanitize.py` |
+| 5 | Kill mid-build, resume | `interrupt()` + per-company `AsyncPostgresSaver` | `graded/test_form_and_chat_agree.py`, manual `docker compose restart api` |
+| 6 | Approval overnight resumes | publish graph parked in the author's schema, resumed via the index after a cold restart | `graded/test_check_06_overnight.py` |
+| 7 | Multi-agent demo with approval | supervisor topology; approval inside the wrapper | `graded/test_check_07_runtime.py` (real filesystem server) |
+| 8 | Postman collection gets a real response | server-generated v2.1, token pre-filled | `graded/test_check_08_postman.py` |
+| 9 | Cross-company id does not reveal existence | 0 rows → identical 404 | `graded/test_check_01_isolation.py` |
 
-- **No fixture data in our repo.** No hardcoded agent arrays, no stubbed API responses in the SPA.
-- **No fake states.** Revoke a real connection and the agent *becomes* degraded. A real failing check
-  *disables* the Publish button.
-- **Real MCP servers over the real protocol.** The registry connects out and calls `tools/list`.
-- **Real tokens, really encrypted.** The credential you paste is the credential the tool call uses.
-- **The demo agent is built by using our own product**, through the builder chat — not inserted.
-
-Every server in the registry's quick-picks is the vendor's own: GitHub's remote MCP server
-(`api.githubcopilot.com/mcp`), Slack's (`mcp.slack.com/mcp`), Atlassian's for Jira
-(`mcp.atlassian.com/v2/mcp`), and the reference `filesystem`, `git` and `sqlite` servers launched
-over stdio. Their tool lists are never typed in — they are whatever `tools/list` returned. The
-remote three refuse an anonymous `tools/list`, so the registry asks for a credential at that point
-and saves it as the connection in the same step.
-
-**Acceptance bar for every screen:** delete the database, `docker compose up`, sign up, and reach
-that screen's finished state using only the product.
+`uv run pytest backend/tests` → **172 passed, 1 skipped** (the opt-in live-model test).
 
 ---
 
-## 14. What we are deliberately not building
+## 15. Real, not mocked
 
-The brief lists these as time sinks that teach little here, and we are taking it at its word:
-code generation with sandboxing, single sign-on, token exchange protocols, per-agent service
-accounts, canary deployments.
+Every server in the quick-picks is the vendor's own; every tool list is whatever `tools/list`
+returned; the token you paste is the token the tool call uses; the graph picture is drawn from the
+stored config; a real failing check disables the Publish button; the demo agent was built through
+the Build screen. Acceptance bar: `docker compose down -v && docker compose up -d --build`, sign up,
+and reach every screen's finished state using only the product.
 
-Also worth knowing: **LangGraph Platform is not free** and self-hosting its Agent Server needs a paid
-licence key. We run our own server from day one. Free tracing is fine to turn on.
+## 16. What is deliberately not built
 
----
-
-## 15. Where to go next
-
-`docs/DESIGN.md` carries the technical design — HLD, LLD, UML sequence and class diagrams, the data
-model, the API contract and the module layout.
-
-Nothing parallel starts until two things exist and are tested: **the config schema in §2** and **the
-tenancy switch in §4**. Those are days 1–2, all four people together.
+Code generation with sandboxing, SSO, token exchange, per-agent service accounts, canaries (the
+brief's list); LangGraph Platform (not free); Alembic migrations (schema changes are `down -v` for
+now); admin invites for joining a company; Groq/Ollama fallbacks (removed — Gemini with a chain of
+Gemini models is the one provider).

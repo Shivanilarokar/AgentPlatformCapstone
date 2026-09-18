@@ -17,9 +17,10 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Link, useOutletContext } from "react-router-dom";
 
-import { ago, get, post } from "../api";
+import { ago, del, get, patch, post } from "../api";
 import { Badge, Card, Check, Empty, Field, Loading, RiskBadge, SectionTitle, TopBar } from "../ui";
 
 const TOOLS_SHOWN = 4;
@@ -41,9 +42,20 @@ function sample(tools) {
 
 /* --------------------------------------------------------------- one card */
 
-function ServerCard({ server, onRefresh, platformAdmin }) {
+function ServerCard({ server, onRefresh, platformAdmin, companyAdmin }) {
   const [checking, setChecking] = useState(false);
   const [all, setAll] = useState(false);
+
+  async function share(visibility) {
+    setChecking(true);
+    try { await patch(`/v1/servers/${server.name}`, { visibility }); } finally { setChecking(false); }
+    await onRefresh();
+  }
+  async function remove() {
+    setChecking(true);
+    try { await del(`/v1/servers/${server.name}`); } finally { setChecking(false); }
+    await onRefresh();
+  }
 
   const tools = all ? server.tools : sample(server.tools);
   const hidden = server.tools.length - tools.length;
@@ -63,7 +75,7 @@ function ServerCard({ server, onRefresh, platformAdmin }) {
         <div className="row" style={{ gap: 8 }}>
           <b style={{ fontSize: 14.5 }} title={server.endpoint}>{server.name}</b>
           <Badge tone={server.health === "ok" ? "ok" : "danger"} dot>{server.health}</Badge>
-          {server.visibility !== "everyone" && <Badge>private</Badge>}
+          {server.visibility === "private" && <Badge>just me</Badge>}
           {server.visibility === "company" && <Badge tone="ok">whole company</Badge>}
         </div>
         {platformAdmin ? null : server.connected
@@ -94,10 +106,29 @@ function ServerCard({ server, onRefresh, platformAdmin }) {
       </div>
 
       <div className="between">
-        <span className="faint" style={{ fontSize: 11.5 }}>checked {ago(server.last_checked_at)}</span>
-        <button className="linkish" style={{ padding: 0 }} onClick={recheck} disabled={checking}>
-          {checking ? "checking…" : "re-check"}
-        </button>
+        <span className="faint" style={{ fontSize: 11.5 }}>
+          {server.registered_by && <>registered by {server.mine ? "you" : server.registered_by} · </>}
+          checked {ago(server.last_checked_at)}
+        </span>
+        <span className="row" style={{ gap: 10 }}>
+          {server.mine && companyAdmin && server.visibility === "private" && (
+            <button className="linkish" style={{ padding: 0 }} onClick={() => share("company")} disabled={checking}
+                    title="Everyone in your company sees its tools and is asked for their own credential">
+              share with company
+            </button>
+          )}
+          {server.mine && companyAdmin && server.visibility === "company" && (
+            <button className="linkish" style={{ padding: 0 }} onClick={() => share("private")} disabled={checking}>
+              make private
+            </button>
+          )}
+          {server.mine && (
+            <button className="linkish" style={{ padding: 0 }} onClick={remove} disabled={checking}>remove</button>
+          )}
+          <button className="linkish" style={{ padding: 0 }} onClick={recheck} disabled={checking}>
+            {checking ? "working…" : "re-check"}
+          </button>
+        </span>
       </div>
     </Card>
   );
@@ -117,7 +148,7 @@ const STEPS = [
   "Store the list; mark the server healthy",
 ];
 
-function RegisterForm({ catalogue, role, onRegistered }) {
+function RegisterForm({ catalogue, role, onRegistered, prefill }) {
   const platformAdmin = role === "platform_admin";
   const [f, setF] = useState(EMPTY);
   const [error, setError] = useState(null);
@@ -137,6 +168,15 @@ function RegisterForm({ catalogue, role, onRegistered }) {
     setNeedsToken(c.transport !== "stdio" && c.auth_type !== "none");
     setError(null); setPhase("idle");
   }, [platformAdmin]);
+
+  // Arriving from the builder's "Register slack" button: /registry?add=slack
+  useEffect(() => {
+    const c = prefill && catalogue.find((x) => x.name === prefill);
+    if (c) {
+      quickPick(c);
+      document.getElementById("register-form")?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [prefill, catalogue, quickPick]);
 
   async function save() {
     setError(null); setPhase("connecting");
@@ -227,7 +267,9 @@ function RegisterForm({ catalogue, role, onRegistered }) {
               </Field>
             )}
             {showToken && (
-              <Field label="Credential" hint="(encrypted; saved as your connection)">
+              <Field label="Credential" hint={platformAdmin
+                  ? "(used once to ask the server for its tools, then dropped - every person connects with their own)"
+                  : "(encrypted; saved as your connection)"}>
                 <input type="password" className="mono" value={f.token} onChange={set("token")}
                        placeholder="paste it here" autoComplete="new-password" />
                 {hint && <div className="faint" style={{ fontSize: 11.5, marginTop: 4 }}>{hint}</div>}
@@ -292,6 +334,7 @@ function RegisterForm({ catalogue, role, onRegistered }) {
 
 export default function Registry() {
   const me = useOutletContext();
+  const [params] = useSearchParams();
   const [servers, setServers] = useState(null);
   const [catalogue, setCatalogue] = useState([]);
   const [error, setError] = useState(null);
@@ -352,12 +395,12 @@ export default function Registry() {
           <>
             <SectionTitle>Private to {me?.company ?? "this workspace"}</SectionTitle>
             <div className="grid">
-              {priv.map((s) => <ServerCard key={s.name} server={s} onRefresh={load} />)}
+              {priv.map((s) => <ServerCard key={s.name} server={s} onRefresh={load} companyAdmin={me?.role === "admin"} />)}
             </div>
           </>
         )}
 
-        <RegisterForm catalogue={catalogue} role={me?.role} onRegistered={load} />
+        <RegisterForm catalogue={catalogue} role={me?.role} onRegistered={load} prefill={params.get("add")} />
       </div>
     </>
   );

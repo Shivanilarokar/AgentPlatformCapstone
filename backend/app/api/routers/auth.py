@@ -41,6 +41,8 @@ class SignUp(BaseModel):
     password: str = Field(min_length=8)
     name: str = Field(min_length=1, max_length=120)
     company: str = Field(min_length=1, max_length=120)
+    #: "create" - a new company, you become its admin. "join" - an existing one, you become a user.
+    intent: str = Field(default="create", pattern=r"^(create|join)$")
 
 
 class SignIn(BaseModel):
@@ -72,10 +74,13 @@ def _set_cookie(response: Response, token: str) -> None:
 
 @router.post("/register", status_code=201)
 async def register(body: SignUp, response: Response, db: AsyncSession = Depends(platform_db)):
-    """Two outcomes, decided by the company name:
+    """Two intents, and the company name must agree with the one you chose:
 
-    * a NEW company  -> it is created, gets its own schema, and you are its admin
-    * an EXISTING one -> you join it as a user
+    * create -> the company must NOT exist yet; it is built and you are its admin
+    * join   -> the company MUST exist; you become one of its users
+
+    Neither silently turns into the other, so nobody becomes an admin by
+    mistyping a name or joins a company they meant to create.
     """
     taken = await db.scalar(select(User).where(func.lower(User.email) == body.email.lower()))
     if taken:
@@ -83,6 +88,10 @@ async def register(body: SignUp, response: Response, db: AsyncSession = Depends(
 
     key = schema_key_for(body.company)
     tenant = await db.scalar(select(Tenant).where(Tenant.schema_key == key))
+    if body.intent == "join" and tenant is None:
+        raise HTTPException(404, detail={"error": "no_such_company"})
+    if body.intent == "create" and tenant is not None:
+        raise HTTPException(409, detail={"error": "company_exists"})
     created = tenant is None
     if created:
         tenant = Tenant(name=body.company, schema_key=key)

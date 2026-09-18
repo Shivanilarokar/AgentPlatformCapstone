@@ -21,7 +21,6 @@ dependencies = [
     "mcp>=2.0",
     # --- model providers ---
     "langchain-google-genai>=2.0",
-    "langchain-groq>=0.3",  # free-tier fallback when Gemini is rate-limited
 ]
 
 [project.optional-dependencies]

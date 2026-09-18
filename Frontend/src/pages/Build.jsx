@@ -16,7 +16,7 @@ import { Badge, Card, RiskBadge, TopBar } from "../ui";
 
 const STEPS = [
   ["understand", "Understand", "Work out what it should do"],
-  ["select", "Pick tools", "Search the registry, ask you"],
+  ["select", "Pick tools", "Search your registry, ask you; say what it lacks"],
   ["connections", "Check connections", "Stop if a credential is missing"],
   ["done", "Build and deploy", "Write the config, create the agent"],
 ];
@@ -78,6 +78,29 @@ function SelectTools({ payload, onAnswer, busy }) {
             ? <>Shape: <b>coordinator + {payload.specialists.map((x) => x.name).join(", ")}</b> — {payload.reasoning}</>
             : <>Shape: <b>single agent</b> — {payload.reasoning}</>}
         </p>
+        {payload.unmet?.length > 0 && (
+          <div className="note warn" style={{ margin: "0 0 12px" }}>
+            <b>Your registry has nothing for part of this.</b>
+            {payload.unmet.map((u) => (
+              <div key={u.need} className="row" style={{ gap: 8, marginTop: 6 }}>
+                <Badge tone="danger">{u.need}</Badge>
+                <span className="muted" style={{ fontSize: 12.5 }}>{u.why}</span>
+                <Link className="btn sm" to={`/registry?add=${u.need}`} target="_blank" rel="noreferrer">
+                  Register {u.need} ↗
+                </Link>
+              </div>
+            ))}
+            <div className="row" style={{ marginTop: 10 }}>
+              <button className="btn primary sm" disabled={busy}
+                      onClick={() => onAnswer({ action: "rescan" })}>
+                I registered it — look again
+              </button>
+              <span className="faint" style={{ fontSize: 12 }}>
+                or carry on below and build without it
+              </span>
+            </div>
+          </div>
+        )}
         <p className="muted" style={{ fontSize: 12.5 }}>
           These are the tools it needs. Untick any you do not want; add others from the full list.
         </p>
@@ -115,9 +138,9 @@ function SelectTools({ payload, onAnswer, busy }) {
         )}
 
         <div className="row" style={{ marginTop: 12 }}>
-          <button className="btn primary sm" disabled={busy || picked.size === 0}
+          <button className={`btn sm ${payload.unmet?.length ? "" : "primary"}`} disabled={busy || picked.size === 0}
                   onClick={() => onAnswer({ selected: [...picked] })}>
-            Use these {picked.size}
+            {payload.unmet?.length ? `Build without ${payload.unmet.map((u) => u.need).join(", ")} — use these ${picked.size}` : `Use these ${picked.size}`}
           </button>
           <span className="faint" style={{ fontSize: 12 }}>
             The build waits here until you answer.

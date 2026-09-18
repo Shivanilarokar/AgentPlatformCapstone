@@ -18,7 +18,7 @@ import uuid
 from sqlalchemy import delete, select
 
 from app.core.db import platform_session, tenant_session
-from app.models.platform_ import Listing, SubmissionIndex, Tenant
+from app.models.platform_ import Listing, SubmissionIndex
 from app.models.tenant import Agent, Submission
 from app.publishing.graph import publish_graph
 from app.tenancy import checkpointers

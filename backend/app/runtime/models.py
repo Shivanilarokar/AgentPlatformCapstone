@@ -28,33 +28,20 @@ from app.core.config import settings
 
 log = logging.getLogger(__name__)
 
-#: Provider -> the env var that must be set for it to be usable. None = no key.
-PROVIDER_KEYS: dict[str, str | None] = {
-    "google_genai": "GOOGLE_API_KEY",
-    "groq": "GROQ_API_KEY",
-    "ollama": None,  # local, needs no key
-}
+#: The one provider this platform runs on. Its key comes from .env (GOOGLE_API_KEY).
+PROVIDER = "google_genai"
 
 #: Tried in order when the configuration's own model is unavailable or rate-limited.
 #: Lite models first - they carry a far larger free-tier daily quota.
 FALLBACKS: list[tuple[str, str]] = [
-    ("google_genai", "gemini-flash-lite-latest"),
-    ("google_genai", "gemini-3.1-flash-lite"),
-    ("google_genai", "gemini-3.5-flash"),
-    ("groq", "llama-3.3-70b-versatile"),
-    ("ollama", "llama3.2"),
+    (PROVIDER, "gemini-flash-lite-latest"),
+    (PROVIDER, "gemini-3.1-flash-lite"),
+    (PROVIDER, "gemini-3.5-flash"),
 ]
 
 
-def available(provider: str) -> bool:
-    if provider not in PROVIDER_KEYS:
-        return False
-    key = PROVIDER_KEYS[provider]
-    return key is None or bool(getattr(settings, key.lower(), None))
-
-
 def _build(provider: str, name: str, temperature: float) -> BaseChatModel | None:
-    if not available(provider):
+    if provider != PROVIDER or not settings.google_api_key:
         return None
     try:
         return init_chat_model(name, model_provider=provider, temperature=temperature)
@@ -82,10 +69,7 @@ def model_chain(spec: ModelSpec) -> list[BaseChatModel]:
             chain.append(model)
 
     if not chain:
-        raise RuntimeError(
-            "no usable model provider. Put GOOGLE_API_KEY or GROQ_API_KEY in .env, "
-            "or run ollama locally."
-        )
+        raise RuntimeError("no usable model: put GOOGLE_API_KEY in .env")
     return chain
 
 

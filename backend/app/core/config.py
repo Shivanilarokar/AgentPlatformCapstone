@@ -17,9 +17,8 @@ class Settings(BaseSettings):
     # security. See docker/db/init.sql.
     database_url: str = "postgresql+psycopg://forge_app:forge_app@localhost:5432/forge"
 
-    # --- model providers (free tiers only; see app/runtime/models.py) ---------
+    # --- the model provider (Gemini free tier; see app/runtime/models.py) ------
     google_api_key: str | None = None
-    groq_api_key: str | None = None
 
     # --- auth ---------------------------------------------------------------
     # Override in .env for anything real; the default keeps a fresh clone working.
@@ -38,8 +37,7 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# init_chat_model reads provider keys from the environment, so mirror whatever
+# init_chat_model reads the provider key from the environment, so mirror what
 # .env gave us back out. Keeps ".env is the single source of truth" true.
-for _field, _env in (("google_api_key", "GOOGLE_API_KEY"), ("groq_api_key", "GROQ_API_KEY")):
-    if (_value := getattr(settings, _field)) and _env not in os.environ:
-        os.environ[_env] = _value
+if settings.google_api_key and "GOOGLE_API_KEY" not in os.environ:
+    os.environ["GOOGLE_API_KEY"] = settings.google_api_key

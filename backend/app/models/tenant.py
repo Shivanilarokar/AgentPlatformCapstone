@@ -31,6 +31,9 @@ from app.models.base import Base
 #: ever passes an owner - and row-level security refuses a row whose owner is
 #: not the signed-in user. See app/tenancy/provision.py for the policies.
 CURRENT_USER = text("NULLIF(current_setting('app.user_id', true), '')::uuid")
+#: The same person, as an email, so a row is readable in pgAdmin without a join.
+#: platform.current_user_email() is created by bootstrap_platform().
+CURRENT_USER_EMAIL = text("platform.current_user_email()")
 
 
 class Agent(Base):
@@ -38,6 +41,7 @@ class Agent(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), server_default=CURRENT_USER)
+    created_by: Mapped[str | None] = mapped_column(String(255), server_default=CURRENT_USER_EMAIL)
     name: Mapped[str] = mapped_column(String(120))
     config: Mapped[dict] = mapped_column(JSONB, default=dict)  # the AgentConfig document (app/builder/schema.py)
     status: Mapped[str] = mapped_column(String(20), default="draft")
@@ -59,6 +63,7 @@ class Run(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), server_default=CURRENT_USER)
+    run_by: Mapped[str | None] = mapped_column(String(255), server_default=CURRENT_USER_EMAIL)
     agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"))
     #: LangGraph thread. The owner is part of the key, so nobody else can name it.
     thread_id: Mapped[str] = mapped_column(String(120))
@@ -88,6 +93,7 @@ class Submission(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), server_default=CURRENT_USER)
+    submitted_by: Mapped[str | None] = mapped_column(String(255), server_default=CURRENT_USER_EMAIL)
     agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"))
     thread_id: Mapped[str] = mapped_column(String(120))
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending | approved | changes_requested | rejected
@@ -110,6 +116,7 @@ class McpServer(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), server_default=CURRENT_USER)
+    registered_by: Mapped[str | None] = mapped_column(String(255), server_default=CURRENT_USER_EMAIL)
     name: Mapped[str] = mapped_column(String(50))
     transport: Mapped[str] = mapped_column(String(20))  # stdio | http | sse
     endpoint: Mapped[str] = mapped_column(String(500))
@@ -176,6 +183,6 @@ class Connection(Base):
     master_key_version: Mapped[int] = mapped_column(Integer, default=1)
 
     status: Mapped[str] = mapped_column(String(20), default="active")  # active|revoked
-    added_by: Mapped[str] = mapped_column(String(255), default="")
+    added_by: Mapped[str | None] = mapped_column(String(255), server_default=CURRENT_USER_EMAIL)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

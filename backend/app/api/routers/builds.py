@@ -33,6 +33,7 @@ class ResumeIn(BaseModel):
     """Whatever the pending interrupt asked for.
 
     select_tools       -> {"selected": ["github.list_issues", ...]}
+                          or {"action": "rescan"} after registering a server it said was missing
     missing_connection -> {"action": "connected"} or {"action": "skip"}
     """
 

@@ -9,15 +9,15 @@ Read `docs/ARCHITECTURE.md` first (plain language, why each decision), then `doc
 
 ---
 
-## Where we stand — 11 Sep 2026 (9 days to submission)
+## Where we stand — 18 Sep 2026 (2 days to submission)
 
 ### The brief's six steps
 
 | Step | Status | What exists today | Files |
 |---|---|---|---|
-| 1 Register a tool server | ✅ done | Form: name, transport (stdio / http / sse), endpoint, auth type, shared or private. The platform connects out and calls `tools/list` — no tool is typed by hand. Read / write / destructive marking. Health job every 5 min marks dead servers `down`. Sharing with everyone = company admins only. | `app/api/routers/servers.py` · `app/mcp_registry/registry.py` · `app/mcp_registry/catalogue.py` · `app/mcp_registry/health.py` · `app/mcp_registry/client.py` (transports + `classify_risk`) · `app/models/tenant.py` (`McpServer`, `McpTool`) · `app/models/platform_.py` (`SharedServer`, `SharedTool`) · `Frontend/src/pages/Registry.jsx` |
+| 1 Register a tool server | ✅ done | Form: name, transport (stdio / http / sse), endpoint, auth type, shared or private. The platform connects out and calls `tools/list` — no tool is typed by hand. Read / write / destructive marking. Health job every 5 min marks dead servers `down`. Three layers: *Just me* (anyone) · *whole company* (the company admin's *share with company*) · *Everyone* (platform admin). | `app/api/routers/servers.py` · `app/mcp_registry/registry.py` · `app/mcp_registry/catalogue.py` · `app/mcp_registry/health.py` · `app/mcp_registry/mcp_client.py` (transports) · `app/mcp_registry/risk.py` (`classify_risk`) · `app/models/tenant.py` (`McpServer`, `McpTool`) · `app/models/platform_.py` (`SharedServer`, `SharedTool`) · `Frontend/src/pages/Registry.jsx` |
 | 2 Connect to it | ✅ done | AES-256-GCM envelope encryption, per-row data key, AAD = tenant + server. No endpoint returns a secret; the UI shows dots. A test stores a sentinel token and greps every table in every schema for it. | `app/vault/envelope.py` · `app/vault/connections.py` · `app/vault/resolver.py` · `app/api/routers/connections.py` · `app/models/tenant.py` (`Connection`) · `Frontend/src/pages/Connections.jsx` |
-| 3 Describe an agent | ✅ | Builder graph with two LangGraph interrupts (`select_tools`, `missing_connection`); survives `docker compose restart api`; form mode drives the *same* graph; the result card shows the score. | `app/builder/schema.py` (`AgentConfig`) · `app/builder/graph.py` · `app/api/routers/builds.py` · `app/tenancy/checkpointers.py` · `Frontend/src/pages/Build.jsx` |
+| 3 Describe an agent | ✅ | Builder graph with two LangGraph interrupts (`select_tools`, `missing_connection`); survives `docker compose restart api`; form mode drives the *same* graph; the result card shows the score. Pause 1 also says what the request needs that is *not in your registry* (with *Register it* → *look again*); a read-then-write job is always coordinator + collector + poster. | `app/builder/schema.py` (`AgentConfig`) · `app/builder/graph.py` · `app/api/routers/builds.py` · `app/tenancy/checkpointers.py` · `Frontend/src/pages/Build.jsx` |
 | 4 Test it | ✅ | Agent page, graph from config, tools table, **Playground** (chat; a write tool pauses the run and shows Approve / Reject inline; survives an API restart; 👍/👎), **Runs** tab, **Scores** (quality 0–100 from six checks, safety A–D from five; each with its reason; `blocked_by` names why it cannot be published). Before every run the Playground checks the agent's connections and, if one is missing, asks for it in the chat instead of running degraded. **API tab**: the endpoint, a curl, *Download Postman collection* (a fresh API token inside), API tokens. | `app/api/routers/runs.py` · `app/api/routers/public_api.py` · `app/scoring/score.py` · `Frontend/src/pages/Playground.jsx` · `Frontend/src/pages/ApiTab.jsx` · `Frontend/src/pages/AgentDetail.jsx` |
 | 5 Publish it | ✅ | Settings tab: Publish is disabled below the threshold and says why; above it, the author sees exactly what will leave (allowlist projection + scrubber), then a publish graph starts and **parks on `admin_review`** in the author's company checkpoints. The platform admin's **Admin Review** queue approves / requests changes / rejects — resuming that run, across restarts. Approval is the only way into `platform.listings`. | `app/publishing/sanitize.py` · `app/publishing/graph.py` · `app/api/routers/publishing.py` · `Submission` / `SubmissionIndex` / `Listing` models · `Frontend/src/pages/Settings.jsx` · `Frontend/src/pages/AdminReview.jsx` |
 | 6 Someone else installs it | ✅ | Marketplace lists approved designs; a listing page shows what it needs from *you* (connected / needs credential / no credential); **Add to my workspace** copies the sanitized design into the installer's schema as their own agent (`installed_from` set, `installs` counted) and lands on its Connections tab to connect their own credentials. The publisher's agent, runs and tokens are untouched and unreachable. | `app/api/routers/publishing.py` (`/v1/listings/{id}`, `/install`) · `Frontend/src/pages/Marketplace.jsx` · Connections tab in `AgentDetail.jsx` · `tests/graded/test_step_06_install.py` |
@@ -45,22 +45,21 @@ Cross-cutting, already done: `app/core/db.py` + `app/api/deps.py` (tenant gate),
 
 ### Health of the tree
 
-- `uv run pytest -q` → **170 passed, 1 skipped** (the skip is the opt-in live-model test).
+- `uv run pytest backend/tests` → **172 passed, 1 skipped** (the skip is the opt-in live-model test).
 - `cd Frontend && npm run build` → clean.
 - `docker compose up -d --build` → 4 containers up (`db`, `api`, `frontend`, `pgadmin`).
-- Dead code and scratch files were cleaned up on 11 Sep; every column now has a descriptive name
-  (`tenants.schema_key`, `mcp_servers.health`/`visibility`/`credential_env_var`, `connections.encrypted_secret`…).
-- **Nothing is committed yet.** First action for whoever reads this: `git add -A && git commit`.
-- No Alembic yet — every model change means `uv run python backend/scripts/reset_db.py` and signing up again.
+- Dead code removed 17 Sep (Groq/Ollama fallbacks, `backend/scripts/`, unused UI exports and mockup CSS); every column has a descriptive name and every per-person table carries a readable `*_by` email next to `owner_id`.
+- No Alembic yet — every model change means `docker compose down -v && docker compose up -d --build` (all data gone) and signing up again.
 
 ### What is pending — build order
 
 | # | Build | Unlocks | Files to create / touch | Est. | Owner |
 |---|---|---|---|---|---|
-| 6 | **Alembic** — two trees (platform, tenant template) + `migrate_all.py` | replaces `reset_db.py` | `alembic/platform/`, `alembic/tenant/` (new) · `scripts/migrate_all.py` · call from `app/tenancy/provision.py` | ½ day | |
+| 1 | **Alembic** — two trees (platform, tenant template) + a loop over every schema | schema changes without `down -v` | `alembic/platform/`, `alembic/tenant/` (new) · call from `app/tenancy/provision.py` | ½ day | |
+| 2 | **Admin invites** — `platform.invites` + *Invite teammate* in Settings; *Join* requires the link | closes "anyone who knows the company name may join" | `models/platform_.py` · `routers/auth.py` · `Frontend/src/pages/Settings.jsx` | ½ day | |
+| 3 | After *request changes*, put the agent back to `draft` | the badge says *in review* forever today | `app/publishing/graph.py::decide` (one line) | 10 min | |
 
-≈ 4 engineer-days across four people. **Freeze features 18 Sep.** 19–20 Sep: the nine checks as
-automated tests, demo recording, design write-up.
+Features are frozen. 19–20 Sep: demo recording, presentation rehearsal.
 
 ### The demo agent (Rule 8) — exists, built through Build
 
@@ -70,10 +69,11 @@ Slack."* → **GitHub Issue Daily Summary**: coordinator + `collector` (`github.
 Northwind Labs, approved by the platform admin, installed by Jai at Maven — the brief's sentence,
 end to end. The publish gate needs one finished run rated 👍 (`MIN_RUNS = 1` in `scoring/score.py`).
 
-### Two things to do today
+### Before the demo
 
-1. Commit the tree (see above).
-2. Rotate the Gemini key and the GitHub PAT that were pasted into a chat window during development.
+1. Commit the tree.
+2. Rotate any key or token that was ever pasted into a chat window during development.
+3. As `admin@forge.dev`, share `github` and `slack` with *Everyone* (section 4) so every account behaves the same.
 
 ---
 
@@ -88,10 +88,9 @@ git clone <repo> && cd AgentPlatformCapstone
 # 1. Secrets. Never commit .env - it is gitignored.
 cat > .env <<'EOF'
 GOOGLE_API_KEY=<your Gemini key from https://aistudio.google.com/apikey>
-GROQ_API_KEY=<optional, free at https://console.groq.com - used when Gemini is rate-limited>
 EOF
 
-# 2. Python deps on the host (for tests and scripts). Creates .venv.
+# 2. Python deps on the host (for the tests). Creates .venv.
 uv sync --extra dev
 
 # 3. Everything else runs in Docker.
@@ -127,7 +126,7 @@ If the UI is ever down: `docker compose ps` — if `frontend` is missing, `docke
 There is no Alembic yet. After any change to `app/models/*.py`:
 
 ```bash
-uv run python backend/scripts/reset_db.py      # drops every schema and rebuilds them - all data is gone
+docker compose down -v && docker compose up -d --build   # drops everything and rebuilds - all data is gone
 # afterwards: sign OUT in the browser (the old cookie names a company that no longer exists),
 # sign the accounts up again, and as admin@forge.dev share filesystem / git / sqlite
 ```
@@ -138,7 +137,7 @@ Then sign up again in the UI.
 
 ```bash
 uv run pytest -q         # needs `docker compose up` (Postgres) - ~90 s
-# expected: 170 passed, 1 skipped   (the skip is the live-model test; opt in with LIVE_MODEL=1)
+# expected: 172 passed, 1 skipped   (the skip is the live-model test; opt in with LIVE_MODEL=1)
 ```
 
 `tests/graded/` has one file per graded check that is implemented so far (1, 2, 7 plus the
@@ -193,7 +192,6 @@ keyed `<user_id>/<build id>`, so a colleague's build id names a thread that does
 Verify it yourself, three ways:
 
 ```bash
-uv run python backend/scripts/verify_isolation.py   # 18 checks over HTTP against the running stack
 uv run pytest -q tests/graded/test_check_01_isolation.py   # the same at the SQL layer, incl. RLS edge cases
 ```
 
@@ -256,8 +254,9 @@ when you register (or under **Connections** later). Every token is encrypted bef
 
 ## 4. Walk the product end to end (what a grader will do)
 
-1. **Sign in** at <http://localhost:5173> as Shivani or Jai (section 2). A signup creates the
-   company's schema (`t_<company>`) at that moment.
+1. **Sign in** at <http://localhost:5173> as Shivani or Jai (section 2). Sign-up has two intents:
+   *Create a new company* (its schema `t_<company>` is built then; you are its admin) or *Join an
+   existing one* (you become a user; the name must match exactly, else `no_such_company`).
 2. **MCP Registry** → paste an address, or click a quick pick. All six are the vendors' own servers:
    - `filesystem`, `git`, `sqlite` — the reference servers, launched over stdio inside the `api`
      container (`/srv/workspace`, `/srv/var/forge.sqlite`). No credential. Register and they are
@@ -271,10 +270,20 @@ when you register (or under **Connections** later). Every token is encrypted bef
      token, and your org admin must have enabled API-token auth for the Rovo MCP server.
    The platform connects out, calls `tools/list`, and stores what came back. Nobody types a tool in.
    **Just me** for anyone; **My company** for the company admin; **Everyone** for the platform admin.
+
+   **For a demo that behaves the same for every person**, put `github` and `slack` where everyone
+   can see them: sign in as `admin@forge.dev`, quick-pick `github`, paste a PAT (used once to ask
+   the server for its tools, then dropped), *Everyone*, save; same for `slack` with an `xoxp-` token.
+   Now Priya, Jai and Riya all see the same registry, the builder designs the same shape for all of
+   them, and each is asked for their *own* credential at pause 2. A company admin can do the same
+   inside one company with *share with company* on a card they registered.
 3. **Connections** → a credential for any server you registered without one. Encrypted before it
    touches the database; the list shows dots, never the value.
 4. **Build** → *"read my open GitHub issues and post a summary to Slack"*. The build pauses twice
-   (pick tools, missing connection). Kill the API mid-pause — `docker compose restart api` — and
+   (pick tools, missing connection). A job that reads and then writes is always coordinator +
+   collector + poster, whoever asks. If the request needs a server you cannot see, pause 1 says
+   *Not in your registry: slack* with a *Register it* link and *look again* — it never quietly
+   builds a smaller agent. Kill the API mid-pause — `docker compose restart api` — and
    reload the page: the same question is still there (check 5).
 5. **My Agents** → the agent → Overview: graph drawn from the stored config, tools with risk and
    approval, the raw configuration JSON.
@@ -317,7 +326,6 @@ JOIN platform.users u ON u.tenant_id = t.id;
 ```bash
 docker compose exec db psql -U forge -d forge -c '\dn'                      # list schemas
 docker compose exec db psql -U forge -d forge -c '\dt t_northwind_labs.*'   # tables in yours
-uv run python backend/scripts/inspect_db.py                                         # every table, every schema
 ```
 
 ### Column names, and what each one means
@@ -329,13 +337,14 @@ uv run python backend/scripts/inspect_db.py                                     
 | `platform.users` | `tenant_id` | which company this person belongs to |
 | | `tenant_id` | which company; NULL for the platform admin |
 | | `role` | `platform_admin` (one, from .env) · `admin` (created the company) · `user` |
-| `t_*.agents / mcp_servers / connections` | `owner_id` | the person who made the row — filled by Postgres from the gate's `app.user_id`; RLS keys on it |
+| `t_*.agents / runs / submissions / mcp_servers / connections` | `owner_id` | the person who made the row — filled by Postgres from the gate's `app.user_id`; RLS keys on it |
+| | `created_by` · `run_by` · `submitted_by` · `registered_by` · `added_by` | the same person as an email, so a row reads without a join — filled by Postgres too (`platform.current_user_email()`), never by a handler |
 | `*.mcp_servers` | `transport` | `stdio` · `http` · `sse` |
 | | `endpoint` | the URL, or the stdio command line |
 | | `auth_type` | `none` · `api_key` · `oauth` |
 | | `credential_env_var` | stdio only: the env var the subprocess reads its token from |
 | | `health` | `ok` · `down` — set by discovery and the 5-minute sweep, never typed |
-| | `visibility` | `private` (just me) · `company` (everyone in my company) — rows in `platform.mcp_servers` are *everyone* |
+| | `visibility` | `private` (just me) · `company` (everyone in my company — the company admin's *share with company* on the card) — rows in `platform.mcp_servers` are *everyone* |
 | | `shared_by` | `platform` — only the platform admin writes this table |
 | | `last_checked_at` | when the sweep last asked it for `tools/list` |
 | `*.mcp_tools` | `input_schema` | the JSON schema the server published for the tool's arguments |
@@ -347,7 +356,6 @@ uv run python backend/scripts/inspect_db.py                                     
 | | `data_key_nonce` | GCM nonce for the line above |
 | | `master_key_version` | which master key sealed it (rotation) |
 | | `status` | `active` · `revoked` |
-| | `added_by` | email of the person who pasted it |
 | | `last_used_at` | last time a tool call or health check borrowed it |
 | `t_*.agents` | `config` | the whole `AgentConfig` document (JSONB) — the agent *is* this |
 | | `installed_from` | the marketplace listing this agent was copied from, if any |
@@ -384,7 +392,6 @@ backend/                     everything Python. ONE entry point: app/server.py (
     tenancy/    provision.py (schema + role + RLS per company), checkpointers.py
     vault/      envelope.py (the only place plaintext exists), connections.py, resolver.py
   tests/        graded/ (one file per check + steps 4-6) · fixtures/ (sample configs)
-  scripts/      reset_db.py · inspect_db.py · verify_isolation.py · run_agent.py
 Frontend/                    React + Vite: src/pages/ (SignIn, Registry, Connections, Build, MyAgents,
                              AgentDetail, Playground, Settings, Marketplace, AdminReview)
 docker/                      db/init.sql (the non-superuser app role) · pgadmin/ (pre-registered server)

@@ -37,6 +37,8 @@ async function request(path, options = {}) {
 export const get = (path) => request(path);
 export const post = (path, data) =>
   request(path, { method: "POST", body: JSON.stringify(data ?? {}) });
+export const patch = (path, data) =>
+  request(path, { method: "PATCH", body: JSON.stringify(data ?? {}) });
 export const del = (path) => request(path, { method: "DELETE" });
 
 /* Server-Sent Events over a POST. Calls onEvent(name, data) per event and

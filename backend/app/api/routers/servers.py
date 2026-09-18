@@ -4,6 +4,8 @@
     GET  /v1/servers/catalogue     quick-picks: the vendors' own servers
     POST /v1/servers               register: name, transport, endpoint, auth type
     POST /v1/servers/{name}/refresh
+    PATCH /v1/servers/{name}       share one I registered with my whole company, or take it back (company admin)
+    DELETE /v1/servers/{name}      remove one I registered
     POST /v1/servers/health-sweep  run the scheduled check now (platform admin)
 
 Who may register with which visibility:
@@ -18,8 +20,11 @@ server that does not answer is not saved.
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from app.api.deps import NOT_FOUND, current_user, require_platform_admin
 from app.core.db import platform_session, tenant_session
@@ -27,6 +32,7 @@ from app.core.security import Claims
 from app.mcp_registry import health, registry
 from app.mcp_registry.catalogue import CATALOGUE
 from app.mcp_registry.mcp_client import AuthRequired
+from app.models.tenant import McpServer
 from app.vault import connections as vault
 
 router = APIRouter(prefix="/v1/servers", tags=["registry"])
@@ -47,6 +53,8 @@ class ServerOut(BaseModel):
     health: str  # ok | down
     visibility: str  # private | company | everyone
     shared_by: str
+    registered_by: str
+    mine: bool
     connected: bool
     last_checked_at: str | None
     tools: list[ToolOut]
@@ -102,6 +110,8 @@ def _out(v: registry.ServerView, connected: set[str]) -> ServerOut:
         health=v.health,
         visibility=v.visibility,
         shared_by=v.shared_by,
+        registered_by=v.registered_by,
+        mine=v.mine,
         # "connected" means an agent here can use it: a stored credential, or
         # a server that never needed one.
         connected=v.name in connected or v.auth_type == "none",
@@ -220,6 +230,41 @@ async def refresh_server(name: str, claims: Claims = Depends(current_user)):
             raise HTTPException(404, detail=NOT_FOUND)
         connected = set() if claims.is_platform_admin else await registry.connected_servers(db)
         return _out(view, connected)
+
+
+class VisibilityIn(BaseModel):
+    visibility: str = Field(pattern=r"^(private|company)$")
+
+
+@router.patch("/{name}", response_model=ServerOut)
+async def set_visibility(name: str, body: VisibilityIn, claims: Claims = Depends(current_user)):
+    """The company admin's one power over the registry: open a server they
+    registered to the whole company (everyone in it then sees its tools and is
+    asked for their OWN credential), or close it again. Row-level security only
+    lets the owner update the row, so the lookup needs no owner filter."""
+    if not claims.is_company_admin:
+        raise HTTPException(403, detail={"error": "forbidden",
+                                         "detail": "Only the company admin can share a server with the company."})
+    async with tenant_session(claims.tenant_key, claims.user_id) as db:
+        row = await db.scalar(select(McpServer).where(McpServer.name == name, McpServer.owner_id == UUID(claims.user_id)))
+        if row is None:
+            raise HTTPException(404, detail=NOT_FOUND)
+        row.visibility = body.visibility
+        await db.flush()
+        connected = await registry.connected_servers(db)
+        view = next(v for v in await registry.list_servers(db) if v.name == name)
+        return _out(view, connected)
+
+
+@router.delete("/{name}", status_code=204)
+async def remove_server(name: str, claims: Claims = Depends(current_user)):
+    """Remove a server I registered (its tools go with it). My credential for
+    it stays on the Connections page until I revoke it there."""
+    async with tenant_session(claims.tenant_key, claims.user_id) as db:
+        row = await db.scalar(select(McpServer).where(McpServer.name == name, McpServer.owner_id == UUID(claims.user_id)))
+        if row is None:
+            raise HTTPException(404, detail=NOT_FOUND)
+        await db.delete(row)
 
 
 @router.post("/health-sweep")

@@ -58,7 +58,8 @@ async def add(
     conn.data_key_nonce = sealed.data_key_nonce
     conn.master_key_version = sealed.master_key_version
     conn.status = "active"
-    conn.added_by = added_by
+    if added_by:
+        conn.added_by = added_by
     await session.flush()
     return conn
 

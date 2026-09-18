@@ -22,7 +22,7 @@ router = APIRouter(prefix="/v1/connections", tags=["connections"])
 class ConnectionOut(BaseModel):
     server_name: str
     status: str
-    added_by: str
+    added_by: str | None = None
     created_at: str
     last_used_at: str | None
     #: Always literally this. There is no code path that fills it with anything.

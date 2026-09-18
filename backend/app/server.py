@@ -2,10 +2,9 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from sqlalchemy import text
 
-from app.api.routers import agents, auth, builds, connections, public_api, publishing, runs, servers
 from app.core.db import engine
+from app.api.routers import agents, auth, builds, connections, public_api, publishing, runs, servers
 from app.mcp_registry import health as health_sweep
 from app.tenancy.checkpointers import close_all
 from app.tenancy.provision import bootstrap_platform, ensure_platform_admin
@@ -41,10 +40,3 @@ async def health():
     """Is the app itself alive?"""
     return {"ok": True}
 
-
-@app.get("/health/db")
-async def health_db():
-    """Can the app reach Postgres? This is what proves compose is wired correctly."""
-    async with engine.connect() as conn:
-        version = await conn.scalar(text("SELECT version()"))
-    return {"ok": True, "postgres": version.split(",")[0]}

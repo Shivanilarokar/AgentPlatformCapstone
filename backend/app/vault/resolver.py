@@ -30,15 +30,6 @@ def vault_resolver(tenant_key: str, user_id: str) -> Callable[[str], Awaitable[s
     return resolve
 
 
-def static_resolver(tokens: dict[str, str]) -> Callable[[str], Awaitable[str | None]]:
-    """For scripts and tests that have no database. Never used by the app."""
-
-    async def resolve(server_name: str) -> str | None:
-        return tokens.get(server_name)
-
-    return resolve
-
-
 def registry_endpoints(tenant_key: str, user_id: str) -> Callable[[str], Awaitable[Endpoint | None]]:
     """Server name -> Endpoint, from what this person can see (mine > company > everyone)."""
 
