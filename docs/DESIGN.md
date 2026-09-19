@@ -568,10 +568,10 @@ else → read
 | POST | `/auth/login` · `/auth/logout` · GET `/auth/me` | — / cookie | cookie JWT; `401 session_stale` if the company is gone |
 | GET | `/v1/servers` | any | my three-layer registry (platform admin: the Everyone layer) |
 | GET | `/v1/servers/catalogue` | any | the six vendor quick-picks |
-| POST | `/v1/servers` | any (visibility gated) | discovers via `tools/list` first; `401 auth_required / credential_rejected`, `422 unreachable` |
+| POST | `/v1/servers` | any (visibility gated) | discovers via `tools/list` first; `401 auth_required / credential_rejected`, `422 unreachable`, `409 already_exists` (never overwrites) |
 | POST | `/v1/servers/{name}/refresh` | any | re-check now |
-| PATCH | `/v1/servers/{name}` | company admin | `{visibility: private\|company}` |
-| DELETE | `/v1/servers/{name}` | owner | remove my registration |
+| PATCH | `/v1/servers/{name}` | admin, owner only | edit a server I own; re-introspects only if the address or credential changed; may flip `visibility` private↔company (company admin); `403` non-admin, `404` not mine |
+| DELETE | `/v1/servers/{name}` | admin, owner only | delete a server I own and its tools (204); saved connections stay for their owners to revoke |
 | POST | `/v1/servers/health-sweep` | platform admin | run the 5-minute sweep now |
 | GET/POST | `/v1/connections` · DELETE `/{server_name}` | workspace | POST seals; nothing ever returns a secret |
 | POST | `/v1/builds` · `/v1/builds/form` | workspace | 202 `{thread_id, status: waiting\|done, interrupt, log, agent_id, config}` |

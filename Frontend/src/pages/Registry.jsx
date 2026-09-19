@@ -45,15 +45,12 @@ function sample(tools) {
 function ServerCard({ server, onRefresh, platformAdmin, companyAdmin }) {
   const [checking, setChecking] = useState(false);
   const [all, setAll] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState(null);
 
   async function share(visibility) {
     setChecking(true);
     try { await patch(`/v1/servers/${server.name}`, { visibility }); } finally { setChecking(false); }
-    await onRefresh();
-  }
-  async function remove() {
-    setChecking(true);
-    try { await del(`/v1/servers/${server.name}`); } finally { setChecking(false); }
     await onRefresh();
   }
 
@@ -67,6 +64,23 @@ function ServerCard({ server, onRefresh, platformAdmin, companyAdmin }) {
     try { await post(`/v1/servers/${server.name}/refresh`); } catch { /* the card will say down */ }
     await onRefresh();
     setChecking(false);
+  }
+
+  async function remove() {
+    const who = server.visibility === "company" ? " Everyone in your company loses it." : "";
+    const shared = server.visibility === "everyone" ? " Every company loses it." : "";
+    if (!window.confirm(
+      `Delete "${server.name}"?${who}${shared} Agents that use its tools will stop working with it. ` +
+      "Saved connections are kept, and you can register it again later."
+    )) return;
+    setDeleting(true); setError(null);
+    try {
+      await del(`/v1/servers/${server.name}`);
+      await onRefresh();  // the card unmounts
+    } catch (e) {
+      setError(e.message);
+      setDeleting(false);
+    }
   }
 
   return (
@@ -122,14 +136,23 @@ function ServerCard({ server, onRefresh, platformAdmin, companyAdmin }) {
               make private
             </button>
           )}
-          {server.mine && (
-            <button className="linkish" style={{ padding: 0 }} onClick={remove} disabled={checking}>remove</button>
-          )}
           <button className="linkish" style={{ padding: 0 }} onClick={recheck} disabled={checking}>
             {checking ? "working…" : "re-check"}
           </button>
         </span>
       </div>
+
+      {error && <div className="note warn" style={{ fontSize: 12 }}>{error}</div>}
+
+      {/* Only an admin, and only for a server they own: the API says so. */}
+      {server.editable && (
+        <div className="row" style={{ gap: 8 }}>
+          <Link className="btn sm" to={`/registry/${server.name}/edit`}>Edit</Link>
+          <button className="btn sm" style={{ color: "var(--danger)" }} onClick={remove} disabled={deleting}>
+            {deleting ? "Deleting…" : "Delete"}
+          </button>
+        </div>
+      )}
     </Card>
   );
 }
@@ -199,6 +222,8 @@ function RegisterForm({ catalogue, role, onRegistered, prefill }) {
       } else if (e.code === "credential_rejected") {
         setNeedsToken(true);
         setError(`${f.name} rejected that credential. ${e.message.split("(").pop().replace(")", "")}. ${hint}`);
+      } else if (e.code === "already_exists") {
+        setError(`${f.name} is already registered. To change it, use Edit on its card above.`);
       } else {
         setError(e.message);
       }

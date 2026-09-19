@@ -6,6 +6,7 @@ import Build from "./pages/Build";
 import Connections from "./pages/Connections";
 import MyAgents from "./pages/MyAgents";
 import Registry from "./pages/Registry";
+import RegistryEdit from "./pages/RegistryEdit";
 import SignIn from "./pages/SignIn";
 import AdminReview from "./pages/AdminReview";
 import Marketplace from "./pages/Marketplace";
@@ -17,6 +18,7 @@ export default function App() {
 
       <Route element={<Shell />}>
         <Route path="/registry" element={<Registry />} />
+        <Route path="/registry/:name/edit" element={<RegistryEdit />} />
 
         <Route path="/build" element={<Build />} />
         <Route path="/agents" element={<MyAgents />} />
