@@ -5,17 +5,22 @@ Every row here came out of the builder. Nothing reads a file.
 
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import NOT_FOUND, tenant_db
+from app.api.deps import NOT_FOUND, tenant_db, workspace_user
 from app.builder.schema import AgentConfig
-from app.models.tenant import Agent, Run
+from app.core.security import Claims
+from app.models.tenant import Agent, Run, Submission
 from app.scoring import score_agent
+from app.tenancy.checkpointers import checkpointer_for
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/agents", tags=["agents"])
 
@@ -96,6 +101,56 @@ async def get_agent(agent_id: UUID, db: AsyncSession = Depends(tenant_db)):
     base = await _scored(db, row)
     return AgentDetail(**base.model_dump(), config=row.config, graph=cfg.graph_nodes_and_edges(),
                        score=row.checks or {})
+
+
+@router.delete("/{agent_id}", status_code=204)
+async def delete_agent(agent_id: UUID, claims: Claims = Depends(workspace_user),
+                       db: AsyncSession = Depends(tenant_db)):
+    """Delete an agent I own, with its runs and its submissions.
+
+    Only the owner can: row-level security leaves nobody else a row to find, so
+    a colleague's (or another company's) id is a 404, same as reading it.
+
+    What goes with it: the agent, its runs and its submissions (the database
+    cascades), and the saved LangGraph state behind each of those threads - a
+    parked run's prompt and tool arguments would otherwise sit in the
+    checkpoint tables for good.
+
+    What stays: a marketplace listing already published from it. That is a
+    sanitized copy on the platform's side, other companies may have installed
+    it, and taking it down is the platform admin's call.
+
+    Refused (409) while a submission is waiting for the admin: the publish run
+    is parked on that agent.
+    """
+    row = await db.scalar(select(Agent).where(Agent.id == agent_id))
+    if row is None:
+        raise HTTPException(404, detail=NOT_FOUND)
+
+    waiting = await db.scalar(select(Submission.id).where(
+        Submission.agent_id == row.id, Submission.status == "pending"))
+    if waiting is not None:
+        raise HTTPException(409, detail={
+            "error": "in_review",
+            "detail": "This agent is waiting for the platform admin to review it. "
+                      "Delete it once they have answered.",
+        })
+
+    threads = [*await db.scalars(select(Run.thread_id).where(Run.agent_id == row.id)),
+               *await db.scalars(select(Submission.thread_id).where(Submission.agent_id == row.id))]
+
+    await db.execute(delete(Agent).where(Agent.id == row.id))  # runs + submissions cascade
+    await db.flush()
+
+    # Best effort, after the rows are gone: a failure here leaves orphaned
+    # checkpoints (a tidiness problem), never a half-deleted agent.
+    saver = await checkpointer_for(claims.tenant_key)
+    for thread_id in filter(None, threads):
+        try:
+            await saver.adelete_thread(thread_id)
+        except Exception:  # noqa: BLE001
+            log.warning("could not delete checkpoints for thread %s", thread_id, exc_info=True)
+    return Response(status_code=204)
 
 
 @router.get("/{agent_id}/scores")

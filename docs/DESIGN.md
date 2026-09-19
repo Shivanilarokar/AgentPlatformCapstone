@@ -578,6 +578,7 @@ else → read
 | POST | `/v1/builds/{thread}/resume` | workspace | `{selected}` · `{action: rescan\|connected\|skip}` |
 | GET | `/v1/builds/{thread}` | workspace | what is it waiting for (survives restarts) |
 | GET | `/v1/agents` · `/v1/agents/{id}` · `/{id}/scores` | workspace | detail carries `config`, `graph`, `score`; 404 across companies |
+| DELETE | `/v1/agents/{id}` | workspace, owner only | `404` otherwise; removes runs, submissions and their checkpoints; `409` while a submission awaits review; a published listing stays |
 | POST | `/v1/agents/{id}/invoke` | cookie or `forge_` token | 202 RunOut; `awaiting_approval` with `pending` |
 | POST | `/v1/agents/{id}/runs/{run}/resume` | cookie or token | `{decision: approve\|reject}` |
 | GET | `/v1/agents/{id}/runs` · `/runs/{run}` | workspace | history |
