@@ -415,4 +415,7 @@ docs/                        ARCHITECTURE.md · DESIGN.md · architecture.drawio
 
 ## 8. Docker, and what each screen writes to the database
 
+To understand the backend code itself — request lifecycle, every endpoint's call chain, the three
+graphs — read `docs/BACKEND.md` (seven flowcharts in `docs/img/flow_*.png`).
+
 Moved to [`docs/VERIFY.md`](docs/VERIFY.md) — why Docker, the four containers, the commands to remember, and for every UI action the table and query that proves it happened (including how an interrupt looks in the checkpoint tables).
