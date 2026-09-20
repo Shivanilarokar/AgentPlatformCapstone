@@ -585,7 +585,7 @@ else → read
 | GET | `/v1/agents/{id}/runs` · `/runs/{run}` | workspace | history |
 | POST | `/v1/agents/{id}/runs/{run}/feedback` | workspace | `{value: 1\|-1}` |
 | GET | `/v1/agents/{id}/readiness` | workspace | per-server: connected · no_credential_needed · needs_credential · not_registered |
-| POST | `/v1/agents/{id}/stream` | cookie or token | SSE: `run`, `activity`, `step`, then `ok\|awaiting_approval\|rejected\|error`; body `{input}` or `{run_id, decision}` |
+| POST | `/v1/agents/{id}/stream` | cookie or token | SSE: `run`, `activity`, `step`, then `ok\|awaiting_approval\|rejected\|error`; body `{input, history?}` or `{run_id, decision}`; `history` = the earlier `{input, output}` turns of the same chat, so a reply is read as a reply |
 | GET | `/v1/agents/{id}/postman` | workspace | v2.1 collection with a fresh token in `token` |
 | GET/POST/DELETE | `/v1/tokens` | workspace | plaintext shown once on create |
 | GET | `/v1/agents/{id}/publish/preview` | workspace | the sanitized listing + gate result |

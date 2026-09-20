@@ -38,8 +38,23 @@ from app.vault.resolver import registry_disabled, registry_endpoints, vault_reso
 router = APIRouter(prefix="/v1/agents/{agent_id}", tags=["runs"])
 
 
+MAX_HISTORY = 6  # earlier turns that are carried along; older ones are dropped
+
+
+class Turn(BaseModel):
+    """One earlier exchange of the same conversation."""
+
+    input: str = Field(max_length=4000)
+    output: str = Field(default="", max_length=4000)
+
+
 class InvokeIn(BaseModel):
     input: str = Field(min_length=1, max_length=4000)
+    #: The earlier turns of this conversation, oldest first. Every run starts
+    #: from nothing, so a reply to a question ("which repository?") would arrive
+    #: as a task with no context - the agent would ask again, forever. Sending
+    #: the turns lets the reply be read as a reply.
+    history: list[Turn] = Field(default_factory=list, max_length=20)
 
 
 class ResumeIn(BaseModel):
@@ -130,8 +145,23 @@ def _apply(run: Run, result: dict[str, Any], started: float) -> None:
     run.status = "rejected" if rejected else "ok"
 
 
-def _state(run: Run) -> dict:
-    return {"task": run.input, "transcript": [], "finished": [], "results": {}}
+def _task(text: str, history: list[Turn] | tuple = ()) -> str:
+    """What the workers are told the task is. On its own when there is no history;
+    otherwise the recent conversation first, so a value given earlier (a
+    repository, a channel) still counts as given."""
+    if not history:
+        return text
+    earlier = "\n".join(f"User: {t.input}\nAgent: {t.output}" for t in list(history)[-MAX_HISTORY:])
+    return (
+        f"Earlier in this conversation:\n{earlier}\n\n"
+        f"The user's new message: {text}\n\n"
+        "Read the new message as a reply to that conversation and carry on with the job it started. "
+        "Anything the user already said there - a repository, a channel, a recipient - counts as given."
+    )
+
+
+def _state(run: Run, history: list[Turn] | tuple = ()) -> dict:
+    return {"task": _task(run.input, history), "transcript": [], "finished": [], "results": {}}
 
 
 # ------------------------------------------------------------------ routes
@@ -153,7 +183,7 @@ async def invoke(
     graph = await _graph(claims, agent, run.thread_id)
     started = time.perf_counter()
     try:
-        result = await graph.ainvoke(_state(run), config={"configurable": {"thread_id": run.thread_id}})
+        result = await graph.ainvoke(_state(run, body.history), config={"configurable": {"thread_id": run.thread_id}})
         _apply(run, result, started)
     except Exception as exc:  # noqa: BLE001 - the run fails; the platform does not
         run.status, run.output = "error", f"{type(exc).__name__}: {str(exc)[:300]}"

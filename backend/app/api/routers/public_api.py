@@ -28,7 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import NOT_FOUND, platform_db, tenant_db, workspace_user
-from app.api.routers.runs import _agent, _apply, _graph, _out, _state
+from app.api.routers.runs import Turn, _agent, _apply, _graph, _out, _state
 from app.builder.schema import AgentConfig
 from app.core.security import Claims, new_api_token
 from app.mcp_registry import registry
@@ -127,6 +127,8 @@ class StreamIn(BaseModel):
     input: str | None = Field(default=None, max_length=4000)
     run_id: UUID | None = None
     decision: str | None = Field(default=None, pattern=r"^(approve|reject)$")
+    #: earlier turns of the same conversation, oldest first (see runs.InvokeIn)
+    history: list[Turn] = Field(default_factory=list, max_length=20)
 
 
 @router.post("/v1/agents/{agent_id}/stream")
@@ -160,7 +162,7 @@ async def stream(agent_id: UUID, body: StreamIn, request: Request,
                   thread_id=f"{claims.user_id}/run-{uuid.uuid4().hex[:12]}")
         db.add(run)
         await db.flush()
-        state = _state(run)
+        state = _state(run, body.history)
 
     graph = await _graph(claims, agent, run.thread_id)
     cfg = {"configurable": {"thread_id": run.thread_id}}

@@ -49,8 +49,9 @@ NO_GUESSING = (
     "an ID - do NOT guess or make one up, and never use a placeholder such as my-org/my-repo, "
     "owner/repo, example or <name>. Use what the user's task says; if it does not say, call no tool "
     "and reply asking for exactly that value, in the form it needs. For a repository say: "
-    "'Please provide the repository name in owner/repo format.' Never say that something could not "
-    "be found when you were never given a real value for it."
+    "'Please provide the repository name in owner/repo format.' A value the user gave earlier in the "
+    "conversation counts as given. Never say that something could not be found when you were never "
+    "given a real value for it."
 )
 
 #: What a model writes when it has no real value and fills the gap anyway:
