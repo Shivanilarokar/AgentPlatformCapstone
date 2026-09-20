@@ -70,6 +70,10 @@ class UnknownTool(Exception):
     """The caller named a tool the server does not have."""
 
 
+class DestructiveNotAllowed(Exception):
+    """An ordinary user asked to switch on a destructive tool. Only an admin may."""
+
+
 def _why(exc: BaseException) -> str:
     """The innermost message. MCP wraps failures in nested ExceptionGroups."""
     while getattr(exc, "exceptions", None):
@@ -228,11 +232,17 @@ async def register(
     shared_by: str = "",
     token: str | None = None,
     enabled_tools: list[str] | None = None,
+    allow_destructive: bool = True,
 ) -> ServerView:
     """Connect, ask what tools it has, store the answer. In that order.
 
     `enabled_tools` is the registrant's pick from `preview()`. All the tools are
     stored; only these are switched on. None switches them all on.
+
+    `allow_destructive=False` (an ordinary user, not an admin): a destructive
+    tool is still stored and listed, but it can never be switched on here.
+    Naming one in `enabled_tools` is refused; leaving the pick out enables
+    everything EXCEPT the destructive tools.
 
         private   mine - the row's owner is whoever the gate signed in
         company   mine, but visible to everyone in my company (admins only)
@@ -258,6 +268,15 @@ async def register(
 
     discovered = await discover(ep, token)
     enable = _chosen(enabled_tools, {t.name for t in discovered})
+    if not allow_destructive:
+        destructive = {t.name for t in discovered if str(t.risk) == "destructive"}
+        asked = destructive.intersection(enabled_tools or ())
+        if asked:
+            raise DestructiveNotAllowed(
+                f"only an admin can enable destructive tools ({', '.join(sorted(asked))})"
+            )
+        allowed_before = enable
+        enable = lambda n: allowed_before(n) and n not in destructive  # noqa: E731
     now = datetime.now(timezone.utc)
 
     if visibility == "everyone":

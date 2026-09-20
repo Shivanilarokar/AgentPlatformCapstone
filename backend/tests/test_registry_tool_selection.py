@@ -270,3 +270,68 @@ async def test_a_tool_the_admin_switched_off_is_not_offered_to_the_model(monkeyp
     seen = await compile_with({"filesystem.write_file"})
     assert "filesystem__write_file" not in seen and "filesystem__read_text_file" in seen
     assert json.loads(CONFIG.read_text(encoding="utf-8"))["tools"]  # the config itself is untouched
+
+
+# ------------------------------------- an ordinary user never enables a destructive tool
+
+
+def with_destructive(scripted):
+    scripted["tools"] = [tool("a"), tool("w", Risk.WRITE), tool("d", Risk.DESTRUCTIVE)]
+
+
+async def test_a_user_who_names_a_destructive_tool_is_refused_and_nothing_is_saved(two_workspaces, scripted):
+    with_destructive(scripted)
+    async with tenant_session(A, ARUN) as s:
+        with pytest.raises(registry.DestructiveNotAllowed):
+            await register(s, enabled=["a", "d"], allow_destructive=False)
+    async with tenant_session(A, ARUN) as s:
+        assert await s.scalar(select(func.count()).select_from(McpServer)) == 0
+
+
+async def test_a_user_who_makes_no_pick_gets_everything_but_the_destructive_tools(two_workspaces, scripted):
+    with_destructive(scripted)
+    async with tenant_session(A, ARUN) as s:
+        view = await register(s, allow_destructive=False)
+    assert names(view) == ["a", "d", "w"]                            # all stored and listed
+    assert names(view, only_enabled=True) == ["a", "w"]              # the destructive one stays off
+
+
+async def test_an_admin_may_enable_a_destructive_tool(two_workspaces, scripted):
+    with_destructive(scripted)
+    async with tenant_session(A, ANNE) as s:
+        view = await register(s, enabled=["a", "d"])
+    assert names(view, only_enabled=True) == ["a", "d"]
+
+
+async def test_discover_marks_destructive_tools_unselectable_for_a_user_only(two_workspaces, scripted, as_user):
+    with_destructive(scripted)
+    body = {"transport": "stdio", "endpoint": "echo hi", "auth_type": "none"}
+
+    async def selectable(claims):
+        async with as_user(claims) as c:
+            r = await c.post("/v1/servers/discover", json=body)
+            assert r.status_code == 200
+            return {t["name"]: t["selectable"] for t in r.json()}
+
+    assert await selectable(ARUN_C) == {"a": True, "d": False, "w": True}
+    assert await selectable(ANNE_C) == {"a": True, "d": True, "w": True}
+
+
+async def test_over_http_a_user_gets_403_for_a_destructive_pick_and_an_admin_does_not(
+    two_workspaces, scripted, as_user,
+):
+    with_destructive(scripted)
+    payload = {"name": NAME, "transport": "stdio", "endpoint": "echo hi", "enabled_tools": ["a", "d"]}
+
+    async with as_user(ARUN_C) as c:
+        r = await c.post("/v1/servers", json=payload)
+        assert r.status_code == 403 and r.json()["detail"]["error"] == "destructive_not_allowed"
+        assert [s for s in (await c.get("/v1/servers")).json() if s["name"] == NAME] == []  # nothing saved
+
+        ok = await c.post("/v1/servers", json={**payload, "enabled_tools": ["a", "w"]})
+        assert ok.status_code == 201
+
+    async with as_user(ANNE_C) as c:
+        r = await c.post("/v1/servers", json=payload)
+        assert r.status_code == 201
+        assert sorted(t["name"] for t in r.json()["tools"] if t["enabled"]) == ["a", "d"]

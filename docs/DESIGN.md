@@ -568,8 +568,8 @@ else → read
 | POST | `/auth/login` · `/auth/logout` · GET `/auth/me` | — / cookie | cookie JWT; `401 session_stale` if the company is gone |
 | GET | `/v1/servers` | any | my three-layer registry (platform admin: the Everyone layer) |
 | GET | `/v1/servers/catalogue` | any | the six vendor quick-picks |
-| POST | `/v1/servers/discover` | any | step one of connecting: reach the server and **list** its tools with risk; saves nothing (no server, no token) |
-| POST | `/v1/servers` | any (visibility gated) | discovers via `tools/list` first; `401 auth_required / credential_rejected`, `422 unreachable`, `409 already_exists` (never overwrites); `enabled_tools` = the admin's allow-list (omit = all on; every tool is stored either way), `422` for an unknown tool name |
+| POST | `/v1/servers/discover` | any | step one of connecting: reach the server and **list** its tools with risk; saves nothing (no server, no token); each tool carries `selectable` - `false` for a destructive tool when the caller is an ordinary user |
+| POST | `/v1/servers` | any (visibility gated) | discovers via `tools/list` first; `401 auth_required / credential_rejected`, `422 unreachable`, `409 already_exists` (never overwrites); `enabled_tools` = the admin's allow-list (omit = all on; every tool is stored either way), `422` for an unknown tool name; `403 destructive_not_allowed` if an ordinary user ticks a destructive tool (omit the pick and it is simply left off) |
 | POST | `/v1/servers/{name}/refresh` | any | re-check now |
 | PATCH | `/v1/servers/{name}` | admin, owner only | edit a server I own; `enabled_tools` replaces the allow-list (no network); re-introspects only if the address or credential changed, and tools first seen then start **off**; may flip `visibility` private↔company (company admin); `403` non-admin, `404` not mine |
 | DELETE | `/v1/servers/{name}` | admin, owner only | delete a server I own and its tools (204); saved connections stay for their owners to revoke |

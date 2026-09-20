@@ -68,6 +68,9 @@ class DiscoveredOut(BaseModel):
     risk: str
     #: what the picker ticks to begin with: read-only tools
     suggested: bool
+    #: may THIS caller switch it on? An ordinary user may not enable a
+    #: destructive tool - the picker shows it, greyed out.
+    selectable: bool
 
 
 class ServerOut(BaseModel):
@@ -158,6 +161,12 @@ def _editable(claims: Claims, v: registry.ServerView) -> bool:
     return claims.is_platform_admin or (claims.is_company_admin and v.mine)
 
 
+def _may_enable(claims: Claims, risk: str) -> bool:
+    """Destructive tools are switched on by an admin only; an ordinary user
+    picks from the read and write tools."""
+    return risk != "destructive" or claims.is_platform_admin or claims.is_company_admin
+
+
 def _require_admin(claims: Claims) -> None:
     if not (claims.is_platform_admin or claims.is_company_admin):
         raise HTTPException(403, detail={
@@ -171,6 +180,8 @@ def _as_http_errors():
     """Turn what registry raises into what the screen understands."""
     try:
         yield
+    except registry.DestructiveNotAllowed as exc:
+        raise HTTPException(403, detail={"error": "destructive_not_allowed", "detail": str(exc)}) from None
     except registry.UnknownTool as exc:
         raise HTTPException(422, detail={"error": "unknown_tool", "detail": str(exc)}) from None
     except registry.ServerExists as exc:
@@ -251,7 +262,8 @@ async def discover_tools(body: DiscoverIn, claims: Claims = Depends(current_user
         )
     return [
         DiscoveredOut(name=t.name, description=t.description[:300], risk=str(t.risk),
-                      suggested=str(t.risk) == "read")
+                      suggested=str(t.risk) == "read",
+                      selectable=_may_enable(claims, str(t.risk)))
         for t in sorted(found, key=lambda t: t.name)
     ]
 
@@ -284,6 +296,7 @@ async def register_server(body: RegisterIn, claims: Claims = Depends(current_use
                 shared_by="platform" if body.visibility == "everyone" else "",
                 token=body.token,
                 enabled_tools=body.enabled_tools,
+                allow_destructive=claims.is_platform_admin or claims.is_company_admin,
             )
 
         if body.token and not claims.is_platform_admin:

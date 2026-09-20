@@ -8,6 +8,10 @@
  *
  * 45 tools is too many to scan, so: grouped by risk (safest first), a search
  * box, and "read-only / all / none" shortcuts.
+ *
+ * A tool the API marks `selectable: false` (a destructive tool, for an ordinary
+ * user) is shown but greyed out and can never be ticked, not even by "all".
+ * The API refuses it too; this is so nobody is offered a box that will fail.
  */
 
 import { useState } from "react";
@@ -25,6 +29,9 @@ export function ToolPicker({ tools, selected, onChange }) {
   );
   const groups = ORDER.map((r) => [r, visible.filter((t) => t.risk === r)]).filter(([, l]) => l.length);
 
+  const canPick = (t) => t.selectable !== false;
+  const locked = tools.filter((t) => !canPick(t)).length;
+
   const set = (names) => onChange(new Set(names));
   const toggle = (name) => {
     const next = new Set(selected);
@@ -40,10 +47,15 @@ export function ToolPicker({ tools, selected, onChange }) {
           <button type="button" className="linkish" onClick={() => set(tools.filter((t) => t.risk === "read").map((t) => t.name))}>
             read-only
           </button>
-          <button type="button" className="linkish" onClick={() => set(tools.map((t) => t.name))}>all</button>
+          <button type="button" className="linkish" onClick={() => set(tools.filter(canPick).map((t) => t.name))}>all</button>
           <button type="button" className="linkish" onClick={() => set([])}>none</button>
         </span>
       </div>
+      {locked > 0 && (
+        <div className="faint" style={{ fontSize: 12, padding: "2px 2px 6px" }}>
+          {locked} destructive tool{locked === 1 ? "" : "s"} can only be enabled by an admin.
+        </div>
+      )}
       {tools.length > 8 && (
         <input type="search" placeholder="Filter tools…" value={q} onChange={(e) => setQ(e.target.value)} />
       )}
@@ -53,8 +65,11 @@ export function ToolPicker({ tools, selected, onChange }) {
           <div key={risk}>
             <div className="grp">{risk} · {list.filter((t) => selected.has(t.name)).length}/{list.length}</div>
             {list.map((t) => (
-              <label className="prow" key={t.name} title={t.description}>
-                <input type="checkbox" checked={selected.has(t.name)} onChange={() => toggle(t.name)} />
+              <label className="prow" key={t.name}
+                     title={canPick(t) ? t.description : "Only an admin can enable destructive tools"}
+                     style={canPick(t) ? undefined : { opacity: 0.5, cursor: "not-allowed" }}>
+                <input type="checkbox" checked={canPick(t) && selected.has(t.name)} disabled={!canPick(t)}
+                       onChange={() => toggle(t.name)} />
                 <span className="nm mono">{t.name}</span>
                 <RiskBadge risk={t.risk} />
               </label>
