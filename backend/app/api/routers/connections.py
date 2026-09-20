@@ -13,7 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import NOT_FOUND, current_user, tenant_db
 from app.core.security import Claims
+from app.mcp_registry import registry
 from app.mcp_registry.catalogue import CATALOGUE
+from app.mcp_registry.mcp_client import AuthRequired
 from app.vault import connections
 
 router = APIRouter(prefix="/v1/connections", tags=["connections"])
@@ -57,6 +59,27 @@ async def add_connection(
 ):
     if body.server_name not in CATALOGUE:
         raise HTTPException(404, detail=NOT_FOUND)
+
+    # Prove the token works BEFORE it is stored. Without this, a mistyped or
+    # revoked token saves as an "active" connection and only fails later, in the
+    # middle of an agent's run. Same check the registry form makes: connect to
+    # the server with it and ask for the tools. Nothing is saved if that fails.
+    #
+    # Skipped when there is nothing to check against: no registered server of
+    # that name yet (an installed agent's connection can be added first), or a
+    # server that needs no credential. A stdio server may also accept any token
+    # at this stage; only a server that checks credentials up front can refuse one.
+    ep = await registry.endpoint_for(db, body.server_name)
+    if ep is not None and ep.needs_token:
+        try:
+            await registry.discover(ep, body.secret)
+        except AuthRequired as exc:
+            raise HTTPException(401, detail={"error": "credential_rejected", "detail": str(exc)}) from None
+        except registry.ServerUnreachable as exc:
+            raise HTTPException(422, detail={
+                "error": "unreachable",
+                "detail": f"Could not check the credential, so it was not saved. {exc}",
+            }) from None
 
     conn = await connections.add(
         db,
