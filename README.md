@@ -15,6 +15,7 @@ admin's review — lets another company install it with their own credentials.
 [HLD / LLD](docs/DESIGN.md) ·
 [Backend code walkthrough](docs/BACKEND.md) ·
 [Verify in the database](docs/VERIFY.md) ·
+[Editable diagrams (.drawio)](docs/architecture.drawio) ·
 [Technical report (.docx)](docs/Forge-Complete-Technical-Report.docx)
 
 </div>
@@ -207,7 +208,7 @@ the health sweep), a cloud KMS (env master key + version column), code generatio
 │   └── src/                     api.js · App.jsx · Shell.jsx · ui.jsx · pages/ (SignIn, Registry, Connections,
 │                                Build, MyAgents, AgentDetail + Playground/ApiTab/Settings, AdminReview, Marketplace)
 ├── docker/db/init.sql           creates the non-superuser app role forge_app
-├── docs/                        ARCHITECTURE · DESIGN (HLD/LLD) · BACKEND (code walkthrough) · VERIFY · report .docx · img/
+├── docs/                        ARCHITECTURE (+ UML) · DESIGN (HLD/LLD) · BACKEND (code walkthrough) · VERIFY · architecture.drawio · report .docx · img/
 ├── docker-compose.yml           db · api · frontend · pgadmin
 ├── Dockerfile                   the api image (Python 3.11, uv, Node for the stdio MCP servers)
 ├── pyproject.toml · uv.lock     Python dependencies

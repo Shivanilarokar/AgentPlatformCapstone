@@ -3,7 +3,9 @@
 Forge, the Agent Platform Capstone. This is the plain-language version of the system that is
 actually running in the repo today. `docs/DESIGN.md` carries the technical HLD/LLD (diagrams,
 data model, API contract, algorithms); `docs/VERIFY.md` says how to see each claim in the
-database; `README.md` is how to run it.
+database; `docs/BACKEND.md` walks the code; `README.md` is how to run it. The block diagrams are
+in `docs/img/` (PNG) and, editable, in `docs/architecture.drawio` (7 pages: containers, inside the
+API, isolation, builder graph, runtime, publish/review/install, data model).
 
 ---
 
@@ -395,3 +397,308 @@ Code generation with sandboxing, SSO, token exchange, per-agent service accounts
 brief's list); LangGraph Platform (not free); Alembic migrations (schema changes are `down -v` for
 now); admin invites for joining a company; Groq/Ollama fallbacks (removed — Gemini with a chain of
 Gemini models is the one provider).
+
+---
+
+## 17. UML — sequence, class and state diagrams
+
+The six steps as sequence diagrams (each names the real router, module and table), the class model of
+the agent document and the runtime, and the state machines. GitHub renders these; they are the same
+diagrams as `docs/DESIGN.md` §7–§10.
+
+### 17.1 Register a tool server (step 1)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Priya
+    participant API as routers/servers.py
+    participant R as mcp_registry/registry.py
+    participant C as mcp_registry/mcp_client.py
+    participant M as MCP server
+    participant DB as Postgres (t_northwind_labs)
+
+    U->>API: POST /v1/servers {name, transport, endpoint, auth_type, visibility, token?}
+    API->>API: may this role use this visibility? (private: any user · company: admin · everyone: platform admin)
+    API->>R: register(...)
+    R->>C: Endpoint.parse → _probe (HTTP initialize; 401/403 → AuthRequired)
+    R->>C: list_tools(ep, token)
+    C->>M: initialize · tools/list
+    M-->>C: [{name, description, inputSchema}]
+    R->>R: classify_risk(name, description) per tool
+    alt answered with tools
+        R->>DB: INSERT mcp_servers (health=ok, owner_id/registered_by by default) · INSERT mcp_tools × N
+        API->>DB: token given and caller is a company user → vault.add(): INSERT connections
+        API-->>U: 201 ServerOut {tools[], risks, connected}
+    else 401 without a token
+        API-->>U: 401 auth_required — nothing saved
+    else rejected the token
+        API-->>U: 401 credential_rejected (server's reason) — nothing saved
+    else no answer / no tools
+        API-->>U: 422 unreachable — nothing saved
+    end
+```
+
+`classify_risk` is deterministic (`mcp_registry/risk.py`): destructive verb anywhere → destructive;
+read verb as the first word → read; write verb anywhere → write; otherwise read. Camel-case names are
+split. The company admin may later `PATCH /v1/servers/{name} {visibility}`; the owner may `DELETE`.
+
+### 17.2 Connect (step 2)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Priya
+    participant API as routers/connections.py
+    participant V as vault/connections.py + envelope.py
+    participant DB as Postgres
+
+    U->>API: POST /v1/connections {server_name: "slack", secret: "xoxp-…"}
+    API->>V: add(tenant, user_id, server_name, secret)
+    V->>V: dek = AESGCM.generate_key(256)
+    V->>V: encrypted_secret = AESGCM(dek).encrypt(nonce, secret, aad="northwind_labs:<user>:slack")
+    V->>V: encrypted_data_key = AESGCM(master).encrypt(nonce2, dek, aad); del dek
+    V->>DB: INSERT/UPDATE connections (4 bytea columns, master_key_version, status=active, added_by)
+    API-->>U: 201 ConnectionOut {server_name, status, added_by, secret: "••••••••••••"}
+    Note over API,U: ConnectionOut.secret is a constant. No endpoint can return a value.
+```
+
+### 17.3 Build an agent — the two graded pauses (step 3)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Priya
+    participant API as routers/builds.py
+    participant G as builder/graph.py
+    participant CP as AsyncPostgresSaver (t_northwind_labs.checkpoints*)
+    participant DB as Postgres
+
+    U->>API: POST /v1/builds {prompt}
+    API->>G: ainvoke({prompt, tenant, user}, thread_id="<user_id>/build-…")
+    G->>DB: understand: registry.list_servers(session) — this person's catalogue
+    G->>G: one structured call → Draft {name, description, tool_refs, specialists, unmet}
+    G->>G: read-then-write → coordinator + collector + poster
+    G->>CP: checkpoint
+    G-->>API: interrupt select_tools {name, suggested, specialists, unmet, catalogue}
+    API-->>U: 202 {thread_id, status: waiting, interrupt}
+    Note over G,CP: NOTHING IS RUNNING. checkpoint_writes has a row with channel='__interrupt__'.<br/>docker compose restart api here — GET /v1/builds/{thread} returns the same interrupt (check 5).
+
+    opt the design named a server this person does not have
+        U->>API: POST …/resume {action: "rescan"}   (after registering it)
+        API->>G: Command(resume) → goto understand → new select_tools
+    end
+
+    U->>API: POST /v1/builds/{thread}/resume {selected: [...]}
+    API->>G: Command(resume=selected)
+    G->>DB: check_connections: active connections ∩ servers needing auth
+    alt something missing
+        G->>CP: checkpoint
+        G-->>API: interrupt missing_connection {missing, required}
+        API-->>U: 202 waiting
+        U->>API: POST …/resume {action: "connected" | "skip"}
+        API->>G: Command(resume) → "connected" re-checks; "skip" drops those tools
+    end
+    G->>DB: assemble: risk/approval from mcp_tools rows; AgentConfig.model_validate
+    G->>DB: persist: INSERT agents (status=draft; owner_id, created_by by default)
+    G-->>API: {agent_id, config}
+    API-->>U: 202 {status: done, agent_id, config}
+```
+
+`POST /v1/builds/form` starts the same graph and answers each interrupt from the form's fields —
+the builder exists once.
+
+### 17.4 Run in the Playground with an approval (step 4)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Priya
+    participant API as routers/public_api.py (stream) / runs.py (invoke, resume)
+    participant RT as runtime/compiler.py
+    participant S as supervisor node
+    participant W as poster specialist
+    participant GT as runtime/guarded_tool.py
+    participant V as vault.use()
+    participant M as mcp.slack.com
+
+    U->>API: POST /v1/agents/{id}/stream {input}   (SSE)
+    API->>API: INSERT runs (status=running, thread_id="<user_id>/run-…")
+    API->>RT: compile_agent(config, RunContext{resolve_token, resolve_endpoint})
+    API->>S: astream(stream_mode=[values, custom])
+    S-->>U: activity: thinking / route → collector
+    Note right of S: collector calls github.list_issues — read → runs straight through
+    S->>W: route → poster
+    W->>GT: slack.slack_send_message(channel, text)
+    GT-->>U: activity: tool_call (write) — a human will be asked
+    GT->>GT: spec.approval == ask → interrupt({type: tool_approval, tool, risk, args: redact(...)})
+    API->>API: runs.status = awaiting_approval, runs.pending = payload
+    API-->>U: SSE awaiting_approval (Approve / Reject card)
+    Note over GT: PARKED in t_northwind_labs.checkpoint_writes. Restart the API — the card is still there.
+
+    U->>API: POST /v1/agents/{id}/stream {run_id, decision: approve}
+    API->>GT: Command(resume="approve")
+    GT->>V: use(tenant, user_id, "slack") → plaintext, this person's row
+    GT->>M: tools/call slack_send_message (Bearer token)
+    M-->>GT: result
+    GT->>GT: del token
+    GT-->>S: tool result
+    S-->>API: final answer
+    API->>API: runs.status=ok, output, transcript, latency_ms (agent's own time only), pending=NULL
+    API-->>U: SSE ok
+    U->>API: POST …/runs/{run}/feedback {value: 1}
+```
+
+### 17.5 Publish → admin review (step 5)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Priya
+    participant API as routers/publishing.py
+    participant SC as scoring/score.py
+    participant P as publishing/graph.py
+    participant T as t_northwind_labs
+    participant PL as platform
+    actor A as admin@forge.dev
+
+    U->>API: GET /v1/agents/{id}/publish/preview
+    API->>SC: score_agent → quality, grade, can_publish, blocked_by
+    API-->>U: {listing (sanitized), quality, grade, can_publish, blocked_by}
+    U->>API: POST /v1/agents/{id}/publish
+    alt below the gate
+        API-->>U: 409 score_too_low "quality 63 is below 70"
+    else
+        API->>T: INSERT submissions (listing, score, status=pending); agents.status=pending_review
+        API->>PL: INSERT submission_index (tenant_key, company, owner_id, agent_id, thread_id, listing, quality, grade, checks)
+        API->>P: ainvoke(thread_id="<user_id>/pub-<submission>") → sanitize → interrupt admin_review
+        API-->>U: 202 SubmissionOut {status: pending}
+    end
+    Note over P,T: PARKED in the author's schema. Days, restarts, weekends.
+
+    A->>API: GET /v1/review   (platform admin; reads submission_index across companies)
+    A->>API: POST /v1/review/{submission}/decide {decision: approve|changes|reject, notes}
+    API->>P: checkpointer_for(idx.tenant_key) → Command(resume={decision, notes})
+    P->>T: decide (system): submissions.status/notes/decided_at; agents.status=live on approve
+    P->>PL: submission_index.status; on approve INSERT listings (the only place Listing( is built)
+    API-->>A: QueueItem
+```
+
+### 17.6 Install from the marketplace (step 6)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor R as Riya @ Maven
+    participant API as routers/publishing.py
+    participant PL as platform.listings
+    participant T as t_maven
+
+    R->>API: GET /v1/listings · GET /v1/listings/{id}
+    API-->>R: cards; detail with connections: {github: not_registered, slack: needs_credential …}
+    R->>API: POST /v1/listings/{id}/install
+    API->>PL: SELECT config; AgentConfig.model_validate; installs += 1
+    API->>T: INSERT agents (config, status=draft, installed_from=listing) — owner_id = Riya by default
+    API-->>R: 201 {agent_id, name, needs: ["github", "slack"]}
+    R->>API: GET /v1/agents/{new}/readiness → missing: [github, slack]
+    Note over R,T: Priya's schema was never touched. requires_connection says "slack", not whose.
+```
+
+---
+
+---
+
+### 17.7 Class model — the document and the runtime
+
+```mermaid
+classDiagram
+    class AgentConfig {
+        +str schema_version
+        +str name
+        +str description
+        +ModelSpec model
+        +Topology topology
+        +list~ToolSpec~ tools
+        +Policy policy
+        +list~str~ requires_connections
+        +str schedule
+        +guarded_tools
+        +graph_nodes_and_edges()
+    }
+    class ModelSpec { +str provider +str name +float temperature }
+    class Topology { +str type +Supervisor supervisor +list~Specialist~ specialists }
+    class Supervisor { +str instructions +list~str~ delegates_to }
+    class Specialist { +str name +str instructions +list~str~ tools }
+    class ToolSpec { +str ref +Risk risk +Approval approval +str requires_connection }
+    class Policy { +list~Risk~ approval_required_for +int max_tool_calls }
+    class RunContext { +str tenant +str user_id +resolve_token(name) +resolve_endpoint(name) }
+    class GuardedTool { +ToolSpec spec +RunContext ctx +__call__(kwargs) str }
+    class compile_agent { +(config, ctx) CompiledStateGraph }
+    class Vault { +add(session, tenant, user_id, server_name, secret) +use(session, tenant, user_id, server_name) str }
+    class McpClient { +list_tools(ep, token) +call_tool(ep, name, args, token) }
+
+    AgentConfig *-- ModelSpec
+    AgentConfig *-- Topology
+    AgentConfig *-- ToolSpec
+    AgentConfig *-- Policy
+    Topology *-- Supervisor
+    Topology *-- Specialist
+    compile_agent ..> AgentConfig : reads
+    compile_agent --> GuardedTool : wraps every tool
+    GuardedTool --> RunContext
+    RunContext ..> Vault : resolve_token = vault.use
+    GuardedTool --> McpClient : executes
+```
+
+No class holds a token as a field. `Vault.use()` returns one into a local inside
+`GuardedTool.__call__`, which is `del`'d in `finally`.
+
+---
+
+---
+
+### 17.8 State machines
+
+#### 17.8.1 Agent
+
+```mermaid
+stateDiagram-v2
+    [*] --> draft : builder persists / marketplace install
+    draft --> pending_review : Publish (quality ≥ 70 and grade ≥ B)
+    pending_review --> live : admin approves
+    pending_review --> pending_review : admin requests changes / rejects (submission carries the notes; author may resubmit)
+    live --> pending_review : Publish again
+```
+
+*Degraded* is not a stored status: it is computed per run (a required connection missing or a
+server down) and shown by the readiness check and the safety checks.
+
+#### 17.8.2 Run
+
+```mermaid
+stateDiagram-v2
+    [*] --> running : invoke / stream
+    running --> awaiting_approval : guarded_tool reaches a write/destructive tool
+    awaiting_approval --> running : approve → tool executes
+    awaiting_approval --> running : reject → tool returns "Rejected by the user"
+    running --> ok : answered
+    running --> rejected : answered after a rejection
+    running --> error : unhandled failure
+```
+
+#### 17.8.3 Build thread
+
+```mermaid
+stateDiagram-v2
+    [*] --> understand
+    understand --> select_tools : ⏸ interrupt
+    select_tools --> understand : resume {action: rescan}
+    select_tools --> check_connections : resume [refs]
+    check_connections --> missing_connection : ⏸ interrupt (something missing)
+    missing_connection --> check_connections : resume {action: connected}
+    missing_connection --> assemble : resume {action: skip}
+    check_connections --> assemble : all present
+    assemble --> persist --> [*]
+```
+
+---
