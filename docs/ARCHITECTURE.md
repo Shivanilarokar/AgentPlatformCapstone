@@ -3,7 +3,7 @@
 Forge, the Agent Platform Capstone. This is the plain-language version of the system that is
 actually running in the repo today. `docs/DESIGN.md` carries the technical HLD/LLD (diagrams,
 data model, API contract, algorithms); `docs/VERIFY.md` says how to see each claim in the
-database; `GUIDE.md` is how to run it.
+database; `README.md` is how to run it.
 
 ---
 

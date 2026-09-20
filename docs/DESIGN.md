@@ -5,9 +5,7 @@ Agent Platform Capstone "Forge" · Data Sense · team of four · submission 20 S
 **Companion documents**
 - `docs/ARCHITECTURE.md` — the same system in plain language
 - `docs/VERIFY.md` — what each screen writes to the database, and the queries to see it
-- `docs/architecture.drawio` — block diagrams drawn from the original plan (structure still holds;
-  this file is authoritative for names and behaviour)
-- `GUIDE.md` — run it, accounts, credentials, tests
+- `README.md` — run it, accounts, credentials, tests
 - `docs/BACKEND.md` — the code walkthrough: request lifecycle, call chain per endpoint, the three graphs, how to extend
 
 Everything below describes the code in `backend/app` and `Frontend/src` as it is today. Every
