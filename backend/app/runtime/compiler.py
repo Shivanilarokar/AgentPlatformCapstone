@@ -39,6 +39,16 @@ log = logging.getLogger(__name__)
 
 MAX_TOOL_ROUNDS = 6  # per specialist, so a confused model cannot loop forever
 
+#: Added to every worker's instructions. Nothing in an agent's configuration
+#: says WHICH repository, channel or recipient it works on; that comes from the
+#: person's message. A model that is not told to ask will invent one - and a
+#: GitHub search of an invented repository returns somebody else's issues.
+NO_GUESSING = (
+    "If a tool needs a value you were not given - a repository, a channel, an address, a file path, "
+    "an ID - do NOT guess or make one up. Use what the user's task says; if it does not say, reply "
+    "asking the user for exactly that value, and call no tool."
+)
+
 
 class RunState(TypedDict):
     """What flows through the graph.
@@ -132,7 +142,7 @@ async def compile_agent(
             # no-op when nobody streams. Never carries tool arguments.
             tell = get_stream_writer()
             messages: list[Any] = [
-                SystemMessage(f"You are '{name}'. {instructions}"),
+                SystemMessage(f"You are '{name}'. {instructions}\n\n{NO_GUESSING}"),
                 HumanMessage(
                     f"Task: {state['task']}\n\n"
                     f"What earlier steps found:\n{_context(state) or '(nothing yet)'}"
@@ -140,6 +150,8 @@ async def compile_agent(
             ]
             lines: list[str] = []
             results: dict[str, str] = {}
+            last_output = ""
+            answered = False
 
             for _ in range(MAX_TOOL_ROUNDS):
                 tell({"kind": "thinking", "worker": name})
@@ -147,6 +159,7 @@ async def compile_agent(
                 messages.append(reply)
 
                 if not reply.tool_calls:
+                    answered = True
                     if text := _text(reply):
                         lines.append(f"[{name}] {_clip(text)}")
                         results[f"{name}.summary"] = text
@@ -166,6 +179,27 @@ async def compile_agent(
                               "ok": not output.startswith("ERROR"), "summary": _clip(output, 140)})
                     lines.append(f"[{name}] {ref or call['name']} -> {_clip(output)}")
                     messages.append(ToolMessage(content=output, tool_call_id=call["id"]))
+                    last_output = output
+
+            if not answered:
+                # The model kept calling tools until the limit and never said anything.
+                # A run must not end as a silent "(no answer)" that reads as success:
+                # ask once, with the tools taken away, for what it found or what stopped
+                # it - and if it still will not answer, say so ourselves.
+                tell({"kind": "thinking", "worker": name})
+                messages.append(HumanMessage(
+                    "You have used all the tool calls you are allowed. Do NOT call any more tools. "
+                    "In two or three sentences say what you found, or what stopped you and what you "
+                    "need from the user to carry on."
+                ))
+                final = await bound.ainvoke(messages)
+                text = "" if final.tool_calls else _text(final)
+                text = text or (
+                    f"I used all {MAX_TOOL_ROUNDS} of my tool calls without reaching an answer. "
+                    f"The last thing a tool told me was: {_clip(last_output, 200)}"
+                )
+                lines.append(f"[{name}] {_clip(text)}")
+                results[f"{name}.summary"] = text
 
             return Command(
                 goto=goto,
