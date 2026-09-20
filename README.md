@@ -217,9 +217,9 @@ the health sweep), a cloud KMS (env master key + version column), code generatio
 
 ---
 
-## Deploying to the cloud
+## What we would do differently with another month
 
-The compose file is the laptop shape; the same images run in the cloud without touching the
+**1. Deploy it to the cloud.** The compose file is the laptop shape; the same images run in the cloud without touching the
 isolation design (it is Postgres roles and row-level security, not infrastructure). The plan:
 
 | Piece | Today | In the cloud |
@@ -234,6 +234,12 @@ isolation design (it is Postgres roles and row-level security, not infrastructur
 Cookies become `Secure`, the health sweep stays a single task per replica, and LangGraph
 checkpoints already live in Postgres, so a replica restart loses nothing.
 
+**2. Migrations** — Alembic with two trees (platform, tenant template) instead of `docker compose down -v`.
+**3. Joining a company by invite link** instead of by name. **4. OAuth connections** for GitHub, Slack
+and Atlassian instead of pasted tokens. **5. Schedules and agent versioning** — `schedule` is already in
+the document; nothing runs it yet. **6. A larger model** behind the same `ModelSpec`.
+The full list, with what we would *not* change, is in [`docs/DESIGN-DOCUMENT.md`](docs/DESIGN-DOCUMENT.md).
+
 ---
 
 ## What is submitted
@@ -243,7 +249,6 @@ checkpoints already live in Postgres, so a replica restart loses nothing.
 | The platform — `docker compose up` and it runs; how to start it and log in | this repository, this README |
 | The design document — how each rule was made true, what we would do with another month | [`docs/DESIGN-DOCUMENT.md`](docs/DESIGN-DOCUMENT.md) |
 | The multi-agent demo agent, built through the platform | *GitHub Issue Daily Summary*: coordinator → `collector` (GitHub) → `poster` (Slack, asks first); built from the brief's sentence in Build, published, approved, installed by a second company |
-| The demo recording — the six steps without cuts | recorded from the walk-through above |
 
 ## Status
 
