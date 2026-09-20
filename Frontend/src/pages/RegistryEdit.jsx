@@ -2,11 +2,11 @@
  *
  * Registering a name that is taken is refused (409); it never overwrites. So
  * this page is how you change a server's address, its credential, its
- * description, or who can see it.
+ * description, who can see it, and which of its tools agents may use.
  *
  * The name is fixed: agents refer to a server by name.
  *
- * Only what changed is sent. A description or visibility change needs no
+ * Only what changed is sent. A description, visibility or tool-selection change needs no
  * network, so it still saves when the server is down or its token has expired;
  * changing the address (or pasting a new credential) makes the platform connect
  * and ask for the tool list again first, and nothing is saved if it does not
@@ -18,6 +18,7 @@ import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom
 
 import { get, patch } from "../api";
 import { Field, Loading, TopBar } from "../ui";
+import { ToolPicker } from "./ToolPicker";
 
 export default function RegistryEdit() {
   const { name } = useParams();
@@ -27,6 +28,7 @@ export default function RegistryEdit() {
 
   const [server, setServer] = useState(undefined); // undefined = loading, null = not editable
   const [f, setF] = useState(null);
+  const [picked, setPicked] = useState(new Set()); // the tools switched on
   const [needsToken, setNeedsToken] = useState(false);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -37,6 +39,7 @@ export default function RegistryEdit() {
         const s = all.find((x) => x.name === name && x.editable);
         setServer(s ?? null);
         if (s) {
+          setPicked(new Set(s.tools.filter((t) => t.enabled).map((t) => t.name)));
           setF({
             transport: s.transport,
             endpoint: s.endpoint,
@@ -87,6 +90,10 @@ export default function RegistryEdit() {
   }
   if ("credential_env_var" in changes) changes.credential_env_var = changes.credential_env_var || null;
   if (f.token) changes.token = f.token;
+  // the allow-list, sent only when it differs from what is stored
+  const stored = server.tools.filter((t) => t.enabled).map((t) => t.name);
+  const toolsChanged = stored.length !== picked.size || stored.some((n) => !picked.has(n));
+  if (toolsChanged) changes.enabled_tools = [...picked];
   const dirty = Object.keys(changes).length > 0;
   const reconnects = ["transport", "endpoint", "auth_type", "credential_env_var", "token"]
     .some((k) => k in changes);
@@ -158,6 +165,20 @@ export default function RegistryEdit() {
             <Field label="Description">
               <input value={f.description} onChange={set("description")} autoComplete="off" />
             </Field>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                Tools agents may use{" "}
+                <span className="faint" style={{ fontWeight: 400 }}>
+                  ({server.tools.length} on this server)
+                </span>
+              </div>
+              <ToolPicker tools={server.tools} selected={picked} onChange={setPicked} />
+              <div className="faint" style={{ fontSize: 11.5, marginTop: 4 }}>
+                Unticked tools disappear from the builder and are refused at run time, even for agents
+                already built. A tool the server adds later starts unticked. Write and destructive
+                tools still ask for approval on every call.
+              </div>
+            </div>
             <Field label="Visible to">
               <select value={f.visibility} onChange={set("visibility")}
                       disabled={platformAdmin} style={{ marginBottom: 2 }}>

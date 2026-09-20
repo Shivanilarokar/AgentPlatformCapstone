@@ -28,11 +28,22 @@ REGISTER CREATES, UPDATE CHANGES
 page). `update()` and `remove()` act on the caller's OWN row only - row-level
 security lets a company read a colleague's "company" server, and even delete it
 (DELETE is checked against the read rule), so ownership is enforced here.
+
+THE ADMIN'S ALLOW-LIST
+----------------------
+Every tool a server reports is stored, but each has an `enabled` flag the
+registrant sets. `list_servers()` / `list_shared()` return ENABLED tools only by
+default, so everything downstream (the builder's catalogue, scoring, the
+runtime) sees exactly the allow-list without knowing it exists. The Registry
+screen passes `include_disabled=True`. A tool that shows up for the first time
+on a later re-check is stored OFF: a vendor update must not quietly hand agents
+new powers.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -53,6 +64,10 @@ class ServerUnreachable(Exception):
 
 class ServerExists(Exception):
     """That name is already registered here. Nothing was changed - edit it instead."""
+
+
+class UnknownTool(Exception):
+    """The caller named a tool the server does not have."""
 
 
 def _why(exc: BaseException) -> str:
@@ -84,11 +99,14 @@ class ServerView:
 # --------------------------------------------------------------------- read
 
 
-async def list_shared(session: AsyncSession) -> list[ServerView]:
+async def list_shared(session: AsyncSession, *, include_disabled: bool = False) -> list[ServerView]:
     """What the platform admin shared with every company. Works from any session:
     platform is always on the search_path."""
     shared = list(await session.scalars(select(SharedServer).order_by(SharedServer.name)))
-    shared_tools = list(await session.scalars(select(SharedTool)))
+    q = select(SharedTool)
+    if not include_disabled:
+        q = q.where(SharedTool.enabled)
+    shared_tools = list(await session.scalars(q))
     return [
         ServerView(
             s.name, s.transport, s.endpoint, s.auth_type, s.description, s.health,
@@ -101,9 +119,11 @@ async def list_shared(session: AsyncSession) -> list[ServerView]:
     ]
 
 
-async def list_servers(session: AsyncSession) -> list[ServerView]:
+async def list_servers(session: AsyncSession, *, include_disabled: bool = False) -> list[ServerView]:
     """What THIS person can use: shared with everyone, shared in the company,
     and their own. Nearer wins on a name clash (mine > company > everyone).
+
+    Tools the admin switched off are left out unless `include_disabled`.
 
     No tenant filter and no owner filter on the private query: the gate pointed
     us at one company's schema, and row-level security hides every row that is
@@ -112,12 +132,14 @@ async def list_servers(session: AsyncSession) -> list[ServerView]:
     mine_or_company = list(await session.scalars(select(McpServer).order_by(McpServer.name)))
     me = await _me(session)
 
-    views: dict[str, ServerView] = {v.name: v for v in await list_shared(session)}
+    views: dict[str, ServerView] = {
+        v.name: v for v in await list_shared(session, include_disabled=include_disabled)
+    }
     for s in sorted(mine_or_company, key=lambda s: s.visibility != "company"):  # company first, mine overrides
         views[s.name] = ServerView(
             s.name, s.transport, s.endpoint, s.auth_type, s.description, s.health,
             "private" if s.owner_id == me and s.visibility == "private" else "company",
-            "", s.last_checked_at, list(s.tools),
+            "", s.last_checked_at, [t for t in s.tools if include_disabled or t.enabled],
             registered_by=s.registered_by or "", mine=s.owner_id == me,
             credential_env_var=s.credential_env_var,
         )
@@ -127,6 +149,14 @@ async def list_servers(session: AsyncSession) -> list[ServerView]:
 async def _me(session: AsyncSession):
     """Who the gate signed in, as row-level security sees them."""
     return await session.scalar(text("SELECT NULLIF(current_setting('app.user_id', true), '')::uuid"))
+
+
+async def disabled_refs(session: AsyncSession) -> set[str]:
+    """`server.tool` refs the admin switched off, for the servers THIS person
+    sees (nearest wins, so a shadowing server's own switches count). The
+    runtime removes these from any agent, however old."""
+    views = await list_servers(session, include_disabled=True)
+    return {f"{v.name}.{t.name}" for v in views for t in v.tools if not t.enabled}
 
 
 async def connected_servers(session: AsyncSession) -> set[str]:
@@ -164,6 +194,27 @@ async def discover(ep: Endpoint, token: str | None) -> list[DiscoveredTool]:
     return found
 
 
+async def preview(
+    transport: str, endpoint: str, auth_type: str = "none",
+    credential_env_var: str | None = None, token: str | None = None,
+) -> list[DiscoveredTool]:
+    """Connect and list the tools, saving NOTHING - not the server, not the token.
+    Step one of the two-step form: the admin sees what is there and picks."""
+    ep = Endpoint.parse(transport, endpoint, credential_env_var, auth_type)
+    return await discover(ep, token)
+
+
+def _chosen(enabled_tools: list[str] | None, known: set[str]) -> Callable[[str], bool]:
+    """Who is switched on. None = everything (API callers that never heard of the
+    picker). A name the server does not have is an error, not a silent skip."""
+    if enabled_tools is None:
+        return lambda _name: True
+    unknown = set(enabled_tools) - known
+    if unknown:
+        raise UnknownTool(f"this server has no tool named {', '.join(sorted(unknown))}")
+    return set(enabled_tools).__contains__
+
+
 async def register(
     session: AsyncSession,
     *,
@@ -176,8 +227,12 @@ async def register(
     visibility: str = "private",
     shared_by: str = "",
     token: str | None = None,
+    enabled_tools: list[str] | None = None,
 ) -> ServerView:
     """Connect, ask what tools it has, store the answer. In that order.
+
+    `enabled_tools` is the registrant's pick from `preview()`. All the tools are
+    stored; only these are switched on. None switches them all on.
 
         private   mine - the row's owner is whoever the gate signed in
         company   mine, but visible to everyone in my company (admins only)
@@ -202,6 +257,7 @@ async def register(
         raise ServerExists(name)
 
     discovered = await discover(ep, token)
+    enable = _chosen(enabled_tools, {t.name for t in discovered})
     now = datetime.now(timezone.utc)
 
     if visibility == "everyone":
@@ -224,7 +280,7 @@ async def register(
     except IntegrityError as exc:  # two requests raced past the check above
         raise ServerExists(name) from exc
 
-    await _replace_tools(session, server.id, discovered, tool_cls, fk)
+    await _replace_tools(session, server.id, discovered, tool_cls, fk, enable_new=enable)
     await session.flush()
 
     tools = list(await session.scalars(select(tool_cls).where(fk == server.id)))
@@ -263,6 +319,7 @@ async def update(
     fields: dict,
     token: str | None = None,
     rediscover: bool = False,
+    enabled_tools: list[str] | None = None,
 ) -> ServerView:
     """Change a server I own. The name is the identity and does not change.
 
@@ -270,8 +327,12 @@ async def update(
     credential_env_var, description, visibility. If anything about HOW to reach
     the server changed (or `rediscover`), we connect and ask again first, and
     save nothing when it does not answer - the same rule as register. A
-    description or visibility change needs no network at all, so it still works
-    when the server is down or its token has expired.
+    description, visibility or tool-selection change needs no network at all, so
+    it still works when the server is down or its token has expired.
+
+    `enabled_tools` replaces the allow-list: the named tools on, every other
+    stored tool off. Tools first seen during this edit's re-connect start off,
+    then this list has the last word.
     """
     server, tool_cls, fk = await _own_row(session, name, shared)
 
@@ -302,7 +363,14 @@ async def update(
     await session.flush()
 
     if discovered is not None:
-        await _replace_tools(session, server.id, discovered, tool_cls, fk)
+        await _replace_tools(session, server.id, discovered, tool_cls, fk, enable_new=lambda _n: False)
+        await session.flush()
+
+    if enabled_tools is not None:
+        stored = list(await session.scalars(select(tool_cls).where(fk == server.id)))
+        chosen = _chosen(enabled_tools, {t.name for t in stored})
+        for t in stored:
+            t.enabled = chosen(t.name)
         await session.flush()
 
     tools = list(await session.scalars(select(tool_cls).where(fk == server.id)))
@@ -372,12 +440,17 @@ async def refresh(
         return "down"
 
     server.health = "ok"
-    await _replace_tools(session, server.id, discovered, tool_cls, fk)
+    await _replace_tools(session, server.id, discovered, tool_cls, fk, enable_new=lambda _n: False)
     return "ok"
 
 
-async def _replace_tools(session, server_id, discovered, tool_cls, fk) -> None:
+async def _replace_tools(
+    session, server_id, discovered, tool_cls, fk, *, enable_new: Callable[[str], bool],
+) -> None:
     """The server's answer is the truth. Tools it no longer reports are dropped.
+
+    A tool already stored keeps its `enabled` flag - the admin's choice survives
+    every re-check. Only a tool seen for the first time gets `enable_new(name)`.
 
     Re-deriving risk on every refresh matters: a tool that gains a destructive
     verb tightens automatically, and cannot be loosened by editing a config.
@@ -387,7 +460,8 @@ async def _replace_tools(session, server_id, discovered, tool_cls, fk) -> None:
     seen: set[str] = set()
     for tool in discovered:
         seen.add(tool.name)
-        row = existing.get(tool.name) or tool_cls(server_id=server_id, name=tool.name)
+        row = existing.get(tool.name) or tool_cls(
+            server_id=server_id, name=tool.name, enabled=enable_new(tool.name))
         row.description = tool.description
         row.input_schema = tool.input_schema
         row.risk = str(tool.risk)

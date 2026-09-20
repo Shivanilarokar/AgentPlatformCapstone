@@ -33,7 +33,7 @@ from app.models.tenant import Agent, Run
 from app.runtime.compiler import compile_agent
 from app.runtime.guarded_tool import RunContext
 from app.tenancy.checkpointers import checkpointer_for
-from app.vault.resolver import registry_endpoints, vault_resolver
+from app.vault.resolver import registry_disabled, registry_endpoints, vault_resolver
 
 router = APIRouter(prefix="/v1/agents/{agent_id}", tags=["runs"])
 
@@ -101,6 +101,7 @@ async def _graph(claims: Claims, agent: Agent, thread_id: str):
         thread_id=thread_id,
         resolve_token=vault_resolver(claims.tenant_key, claims.user_id),
         resolve_endpoint=registry_endpoints(claims.tenant_key, claims.user_id),
+        resolve_disabled=registry_disabled(claims.tenant_key, claims.user_id),
     )
     return await compile_agent(cfg, ctx, checkpointer=await checkpointer_for(claims.tenant_key))
 

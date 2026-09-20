@@ -97,7 +97,15 @@ async def compile_agent(
     checkpointer: BaseCheckpointSaver | None = None,
 ):
     """Build a runnable graph from a config document."""
-    by_ref = {t.ref: t for t in config.tools}
+    # The admin's allow-list wins over what the configuration says: a tool they
+    # switched off after this agent was built is simply not there. Read on every
+    # compile, so a run resumed days later after a pause honours it too.
+    off = await ctx.resolve_disabled() if ctx.resolve_disabled else set()
+    dropped = off & {t.ref for t in config.tools}
+    if dropped:
+        log.warning("tools switched off in the registry, left out of this agent: %s",
+                    ", ".join(sorted(dropped)))
+    by_ref = {t.ref: t for t in config.tools if t.ref not in dropped}
     schemas = await _tool_schemas(config, ctx)
 
     # The guarded runner for each tool. EVERY call the model makes lands here.

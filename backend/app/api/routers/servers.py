@@ -2,7 +2,9 @@
 
     GET  /v1/servers               what I can use: mine + my company's + everyone's
     GET  /v1/servers/catalogue     quick-picks: the vendors' own servers
-    POST /v1/servers               register: name, transport, endpoint, auth type
+    POST /v1/servers/discover      connect and LIST the tools; saves nothing
+    POST /v1/servers               register: name, transport, endpoint, auth type,
+                                   and which tools to switch on (`enabled_tools`)
                                    (409 if the name is taken - it never overwrites)
     PATCH /v1/servers/{name}       edit a server I own            (admins)
     DELETE /v1/servers/{name}      delete a server I own          (admins)
@@ -46,6 +48,26 @@ class ToolOut(BaseModel):
     name: str
     description: str
     risk: str
+    #: on the admin's allow-list? Off = stored, but no agent can use it.
+    enabled: bool = True
+
+
+class DiscoverIn(BaseModel):
+    """What the form knows before it saves anything: how to reach the server."""
+
+    transport: str = Field(pattern=r"^(stdio|http|sse)$")
+    endpoint: str = Field(min_length=1, max_length=500)
+    auth_type: str = Field(default="none", pattern=r"^(none|api_key|oauth)$")
+    credential_env_var: str | None = Field(default=None, max_length=80)
+    token: str | None = None
+
+
+class DiscoveredOut(BaseModel):
+    name: str
+    description: str
+    risk: str
+    #: what the picker ticks to begin with: read-only tools
+    suggested: bool
 
 
 class ServerOut(BaseModel):
@@ -97,6 +119,9 @@ class RegisterIn(BaseModel):
     #: without one. When given, it is used for discovery and then saved -
     #: encrypted - as MY connection, so "Connect & save" means both.
     token: str | None = None
+    #: The tools to switch on, from the picker. Every tool is stored either
+    #: way. Omit it to switch them all on.
+    enabled_tools: list[str] | None = None
 
 
 class PatchIn(BaseModel):
@@ -114,6 +139,9 @@ class PatchIn(BaseModel):
     #: A new credential. It is tried against the server first, then replaces
     #: MY saved connection. Leave it out to keep the one already saved.
     token: str | None = None
+    #: The allow-list: these tools on, every other stored tool off. Leave it
+    #: out to leave the tools as they are. Needs no network.
+    enabled_tools: list[str] | None = None
 
 
 def _session(claims: Claims):
@@ -143,6 +171,8 @@ def _as_http_errors():
     """Turn what registry raises into what the screen understands."""
     try:
         yield
+    except registry.UnknownTool as exc:
+        raise HTTPException(422, detail={"error": "unknown_tool", "detail": str(exc)}) from None
     except registry.ServerExists as exc:
         raise HTTPException(409, detail={
             "error": "already_exists",
@@ -180,7 +210,7 @@ def _out(v: registry.ServerView, connected: set[str], claims: Claims) -> ServerO
         editable=_editable(claims, v),
         last_checked_at=v.last_checked_at.isoformat() if v.last_checked_at else None,
         tools=[
-            ToolOut(name=t.name, description=t.description, risk=t.risk)
+            ToolOut(name=t.name, description=t.description, risk=t.risk, enabled=t.enabled)
             for t in sorted(v.tools, key=lambda t: t.name)
         ],
     )
@@ -190,9 +220,11 @@ def _out(v: registry.ServerView, connected: set[str], claims: Claims) -> ServerO
 async def list_servers(claims: Claims = Depends(current_user)):
     async with _session(claims) as db:
         if claims.is_platform_admin:
-            return [_out(v, set(), claims) for v in await registry.list_shared(db)]
+            return [_out(v, set(), claims)
+                    for v in await registry.list_shared(db, include_disabled=True)]
         connected = await registry.connected_servers(db)
-        return [_out(v, connected, claims) for v in await registry.list_servers(db)]
+        return [_out(v, connected, claims)
+                for v in await registry.list_servers(db, include_disabled=True)]
 
 
 @router.get("/catalogue", response_model=list[CatalogueOut])
@@ -205,6 +237,22 @@ async def catalogue():
             credential_hint=s.credential_hint, homepage=s.homepage,
         )
         for s in CATALOGUE.values()
+    ]
+
+
+@router.post("/discover", response_model=list[DiscoveredOut])
+async def discover_tools(body: DiscoverIn, claims: Claims = Depends(current_user)):
+    """Step one of connecting: reach the server and list its tools. Saves
+    nothing - not the server, not the token - so the admin can look at what is
+    there and tick what agents may use before anything is stored."""
+    with _as_http_errors():
+        found = await registry.preview(
+            body.transport, body.endpoint, body.auth_type, body.credential_env_var, body.token,
+        )
+    return [
+        DiscoveredOut(name=t.name, description=t.description[:300], risk=str(t.risk),
+                      suggested=str(t.risk) == "read")
+        for t in sorted(found, key=lambda t: t.name)
     ]
 
 
@@ -235,6 +283,7 @@ async def register_server(body: RegisterIn, claims: Claims = Depends(current_use
                 visibility=body.visibility,
                 shared_by="platform" if body.visibility == "everyone" else "",
                 token=body.token,
+                enabled_tools=body.enabled_tools,
             )
 
         if body.token and not claims.is_platform_admin:
@@ -254,7 +303,7 @@ async def edit_server(name: str, body: PatchIn, claims: Claims = Depends(current
     _require_admin(claims)
 
     fields = {k: v for k, v in body.model_dump(exclude_unset=True).items()
-              if k != "token" and (v is not None or k == "credential_env_var")}
+              if k not in ("token", "enabled_tools") and (v is not None or k == "credential_env_var")}
     if "credential_env_var" in fields:
         fields["credential_env_var"] = fields["credential_env_var"] or None
 
@@ -279,6 +328,7 @@ async def edit_server(name: str, body: PatchIn, claims: Claims = Depends(current
                     view = await registry.update(
                         db, name, shared=claims.is_platform_admin, fields=fields,
                         token=token, rediscover=bool(body.token),
+                        enabled_tools=body.enabled_tools,
                     )
                 except KeyError:
                     raise HTTPException(404, detail=NOT_FOUND) from None
@@ -334,8 +384,8 @@ async def refresh_server(name: str, claims: Claims = Depends(current_user)):
                 raise HTTPException(404, detail=NOT_FOUND) from None
 
     async with _session(claims) as db:
-        views = await (registry.list_shared(db) if claims.is_platform_admin
-                       else registry.list_servers(db))
+        views = await (registry.list_shared(db, include_disabled=True) if claims.is_platform_admin
+                       else registry.list_servers(db, include_disabled=True))
         view = next((v for v in views if v.name == name), None)
         if view is None:
             raise HTTPException(404, detail=NOT_FOUND)

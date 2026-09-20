@@ -13,7 +13,8 @@
  *
  * The three remote servers (GitHub, Slack, Atlassian) answer 401 to an
  * anonymous tools/list. The API reports that as `auth_required`; the form then
- * shows a credential field, and "Connect & save" does both things at once.
+ * shows a credential field. Connecting is two steps: "Connect" lists the tools
+ * (nothing is saved), the admin ticks which ones agents may use, then "Save".
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -22,6 +23,7 @@ import { Link, useOutletContext } from "react-router-dom";
 
 import { ago, del, get, patch, post } from "../api";
 import { Badge, Card, Check, Empty, Field, Loading, RiskBadge, SectionTitle, TopBar } from "../ui";
+import { ToolPicker } from "./ToolPicker";
 
 const TOOLS_SHOWN = 4;
 const RISKS = ["destructive", "write", "read"];
@@ -54,9 +56,11 @@ function ServerCard({ server, onRefresh, platformAdmin, companyAdmin }) {
     await onRefresh();
   }
 
-  const tools = all ? server.tools : sample(server.tools);
-  const hidden = server.tools.length - tools.length;
-  const counts = RISKS.map((r) => [r, server.tools.filter((t) => t.risk === r).length])
+  // Only what the admin switched on: that is all an agent can ever use.
+  const enabled = server.tools.filter((t) => t.enabled);
+  const tools = all ? enabled : sample(enabled);
+  const hidden = enabled.length - tools.length;
+  const counts = RISKS.map((r) => [r, enabled.filter((t) => t.risk === r).length])
     .filter(([, n]) => n > 0);
 
   async function recheck() {
@@ -102,12 +106,19 @@ function ServerCard({ server, onRefresh, platformAdmin, companyAdmin }) {
       <div className="row wrap" style={{ gap: 6 }}>
         <span className="chip">{server.transport}</span>
         <span className="chip">{server.auth_type}</span>
-        <span className="chip">{server.tools.length} tools</span>
+        <span className="chip" title="tools switched on / tools the server reports">
+          {enabled.length === server.tools.length
+            ? `${enabled.length} tools`
+            : `${enabled.length} of ${server.tools.length} tools on`}
+        </span>
         {counts.map(([r, n]) => <RiskBadge key={r} risk={r} label={`${n} ${r}`} />)}
       </div>
 
       <hr className="sep" style={{ margin: "4px 0" }} />
       <div>
+        {enabled.length === 0 && (
+          <div className="faint" style={{ fontSize: 12.5 }}>No tools switched on — agents can't use this server.</div>
+        )}
         {tools.map((t) => (
           <div className="toolrow" key={t.name}>
             <span className="mono" title={t.description}>{t.name}</span>
@@ -168,28 +179,40 @@ const STEPS = [
   "Open a connection to the endpoint",
   "Ask it for its tool list",
   "Mark each tool read, write or destructive",
+  "You pick which tools agents may use",
   "Store the list; mark the server healthy",
 ];
 
+/* Changing any of these means the tool list on screen came from somewhere else. */
+const CONNECTION_KEYS = ["transport", "endpoint", "auth_type", "credential_env_var", "token"];
+
 function RegisterForm({ catalogue, role, onRegistered, prefill }) {
   const platformAdmin = role === "platform_admin";
-  const [f, setF] = useState(EMPTY);
+  // The platform admin's only choice is "Everyone", so that is the value to start from.
+  const blank = platformAdmin ? { ...EMPTY, visibility: "everyone" } : EMPTY;
+  const [f, setF] = useState(blank);
   const [error, setError] = useState(null);
   const [needsToken, setNeedsToken] = useState(false);
   const [phase, setPhase] = useState("idle"); // idle | connecting | ok | failed
   const [hint, setHint] = useState("");
+  // Step one ("Connect") fills these; step two ("Save") sends the ticked names.
+  const [found, setFound] = useState(null); // null until the server has been asked
+  const [picked, setPicked] = useState(new Set());
 
-  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const set = (k) => (e) => {
+    setF({ ...f, [k]: e.target.value });
+    if (CONNECTION_KEYS.includes(k)) setFound(null);
+  };
 
   const quickPick = useCallback((c) => {
     setF({
-      ...EMPTY,
+      ...blank,
       name: c.name, transport: c.transport, endpoint: c.endpoint,
       auth_type: c.auth_type, credential_env_var: c.credential_env_var ?? "", description: c.description,
     });
     setHint(c.credential_hint || "");
     setNeedsToken(c.transport !== "stdio" && c.auth_type !== "none");
-    setError(null); setPhase("idle");
+    setError(null); setPhase("idle"); setFound(null);
   }, [platformAdmin]);
 
   // Arriving from the builder's "Register slack" button: /registry?add=slack
@@ -201,6 +224,38 @@ function RegisterForm({ catalogue, role, onRegistered, prefill }) {
     }
   }, [prefill, catalogue, quickPick]);
 
+  function fail(e) {
+    setPhase("failed");
+    if (e.code === "auth_required") {
+      setNeedsToken(true);
+      setError(`${f.name || "That server"} answered but will not list its tools without a credential. Paste one and try again.`);
+    } else if (e.code === "credential_rejected") {
+      setNeedsToken(true);
+      setError(`${f.name || "That server"} rejected that credential. ${e.message.split("(").pop().replace(")", "")}. ${hint}`);
+    } else if (e.code === "already_exists") {
+      setError(`${f.name} is already registered. To change it, use Edit on its card above.`);
+    } else {
+      setError(e.message);
+    }
+  }
+
+  /* Step one: reach the server and list its tools. Nothing is saved. */
+  async function connect() {
+    setError(null); setPhase("connecting");
+    try {
+      const list = await post("/v1/servers/discover", {
+        transport: f.transport, endpoint: f.endpoint.trim(), auth_type: f.auth_type,
+        credential_env_var: f.credential_env_var.trim() || null, token: f.token || null,
+      });
+      setFound(list);
+      setPicked(new Set(list.filter((t) => t.suggested).map((t) => t.name))); // read-only to start
+      setPhase("idle");
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  /* Step two: save the server with the tools the admin ticked. */
   async function save() {
     setError(null); setPhase("connecting");
     try {
@@ -208,31 +263,20 @@ function RegisterForm({ catalogue, role, onRegistered, prefill }) {
         name: f.name.trim(), transport: f.transport, endpoint: f.endpoint.trim(),
         auth_type: f.auth_type, credential_env_var: f.credential_env_var.trim() || null,
         description: f.description.trim(), visibility: f.visibility,
-        token: f.token || null,
+        token: f.token || null, enabled_tools: [...picked],
       });
       setPhase("ok");
       setError(null);
-      setF(EMPTY); setNeedsToken(false); setHint("");
+      setF(blank); setNeedsToken(false); setHint(""); setFound(null); setPicked(new Set());
       await onRegistered(created);
     } catch (e) {
-      setPhase("failed");
-      if (e.code === "auth_required") {
-        setNeedsToken(true);
-        setError(`${f.name} answered but will not list its tools without a credential. Paste one and save again.`);
-      } else if (e.code === "credential_rejected") {
-        setNeedsToken(true);
-        setError(`${f.name} rejected that credential. ${e.message.split("(").pop().replace(")", "")}. ${hint}`);
-      } else if (e.code === "already_exists") {
-        setError(`${f.name} is already registered. To change it, use Edit on its card above.`);
-      } else {
-        setError(e.message);
-      }
+      fail(e);
     }
   }
 
   function cancel() {
-    setF({ ...EMPTY, visibility: platformAdmin ? "everyone" : "private" });
-    setError(null); setPhase("idle"); setNeedsToken(false); setHint("");
+    setF(blank);
+    setError(null); setPhase("idle"); setNeedsToken(false); setHint(""); setFound(null); setPicked(new Set());
   }
 
   const placeholder = {
@@ -251,7 +295,7 @@ function RegisterForm({ catalogue, role, onRegistered, prefill }) {
           <div className="mh">
             <div style={{ fontWeight: 650, fontSize: 14.5 }}>Register an MCP server</div>
             <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
-              Saved only after the platform successfully connects.
+              Connect first, then choose which tools agents may use. Nothing is saved until you do.
             </div>
             <div className="row wrap" style={{ gap: 5, marginTop: 8 }}>
               {catalogue.map((c) => (
@@ -314,6 +358,19 @@ function RegisterForm({ catalogue, role, onRegistered, prefill }) {
               </select>
             </Field>
 
+            {found && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                  Tools agents may use <span className="faint" style={{ fontWeight: 400 }}>({found.length} found)</span>
+                </div>
+                <ToolPicker tools={found} selected={picked} onChange={setPicked} />
+                <div className="faint" style={{ fontSize: 11.5, marginTop: 4 }}>
+                  Read-only tools are ticked to start. Write and destructive tools still ask a person to
+                  approve every call. You can change this later with Edit.
+                </div>
+              </div>
+            )}
+
             {error && (
               <div className="note warn" style={{ marginBottom: 12 }}>
                 <b>Nothing was saved.</b> {error}
@@ -321,10 +378,18 @@ function RegisterForm({ catalogue, role, onRegistered, prefill }) {
             )}
 
             <div className="row">
-              <button className="btn primary sm" onClick={save}
-                      disabled={phase === "connecting" || !f.name.trim() || !f.endpoint.trim()}>
-                {phase === "connecting" ? "Connecting…" : "Connect & save"}
-              </button>
+              {found ? (
+                <button className="btn primary sm" onClick={save}
+                        disabled={phase === "connecting" || picked.size === 0 || !f.name.trim()}
+                        title={picked.size === 0 ? "Tick at least one tool" : !f.name.trim() ? "Give it a name" : ""}>
+                  {phase === "connecting" ? "Saving…" : `Save server (${picked.size} tool${picked.size === 1 ? "" : "s"})`}
+                </button>
+              ) : (
+                <button className="btn primary sm" onClick={connect}
+                        disabled={phase === "connecting" || !f.endpoint.trim()}>
+                  {phase === "connecting" ? "Connecting…" : "Connect"}
+                </button>
+              )}
               <button className="btn sm" onClick={cancel}>Cancel</button>
             </div>
           </div>
