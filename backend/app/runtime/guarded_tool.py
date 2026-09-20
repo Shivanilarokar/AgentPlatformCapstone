@@ -56,6 +56,11 @@ class RunContext:
     #: SERVER NAME -> how to reach it. In the app this reads the registry
     #: (private, then shared); scripts use the catalogue.
     resolve_endpoint: Callable[[str], Awaitable[Endpoint | None]]
+    #: TOOL REFS ("server.tool") the admin switched off in the registry. The
+    #: compiler removes them from the agent, so the model is never offered
+    #: one - however old the agent's configuration is. None = nothing is off
+    #: (scripts and tests that have no registry).
+    resolve_disabled: Callable[[], Awaitable[set[str]]] | None = None
 
 
 def guarded_tool(spec: ToolSpec, ctx: RunContext) -> Callable[..., Awaitable[str]]:

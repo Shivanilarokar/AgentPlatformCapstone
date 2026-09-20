@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     Integer,
@@ -152,6 +153,10 @@ class McpTool(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     input_schema: Mapped[dict] = mapped_column(JSONB, default=dict)
     risk: Mapped[str] = mapped_column(String(20))  # read | write | destructive
+    #: The admin's allow-list. Every tool the server reports is stored, but only
+    #: enabled ones are offered to the builder, count in scoring, or run.
+    #: Defaults on so rows that pre-date the column keep working.
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
 
     server: Mapped[McpServer] = relationship(back_populates="tools")
 

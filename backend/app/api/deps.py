@@ -63,7 +63,15 @@ def workspace_user(claims: Claims = Depends(current_user)) -> Claims:
 
 
 async def tenant_db(claims: Claims = Depends(workspace_user)) -> AsyncIterator[AsyncSession]:
-    """One transaction, pointed at this company's schema and this person's rows."""
+    """One transaction, pointed at this company's schema and this person's rows.
+
+    ALWAYS declare it as `Depends(tenant_db, scope="function")`. The default
+    scope runs the code after `yield` - our COMMIT - only once the response has
+    been sent, so the browser's next request (a list refresh) can read the rows
+    as they were before the write. `scope="function"` commits before the
+    response goes out. Only a route that keeps using the session while it
+    streams (the SSE `stream` route) may leave it off.
+    tests/test_commit_before_response.py fails if a route forgets."""
     try:
         async with tenant_session(claims.tenant_key, claims.user_id) as session:
             yield session
@@ -76,6 +84,7 @@ async def tenant_db(claims: Claims = Depends(workspace_user)) -> AsyncIterator[A
 
 
 async def platform_db() -> AsyncIterator[AsyncSession]:
-    """For sign-in and the platform admin: no company, so only the shared schema."""
+    """For sign-in and the platform admin: no company, so only the shared schema.
+    Declare it with `scope="function"` too - see tenant_db."""
     async with platform_session() as session:
         yield session

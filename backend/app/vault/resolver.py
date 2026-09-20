@@ -38,3 +38,13 @@ def registry_endpoints(tenant_key: str, user_id: str) -> Callable[[str], Awaitab
             return await registry.endpoint_for(session, server_name)
 
     return resolve
+
+
+def registry_disabled(tenant_key: str, user_id: str) -> Callable[[], Awaitable[set[str]]]:
+    """The tool refs the admin switched off, as this person sees the registry."""
+
+    async def resolve() -> set[str]:
+        async with tenant_session(tenant_key, user_id) as session:
+            return await registry.disabled_refs(session)
+
+    return resolve

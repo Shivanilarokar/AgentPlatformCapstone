@@ -10,6 +10,12 @@ The brief on those two stops:
      project. They are LangGraph interrupts, and the build must survive a server
      restart while it is paused and pick up exactly where it left off."
 
+Before either stop, `understand` checks the request can be done AT ALL. It makes
+the model list each action asked for and the tool that does it; if any action has
+no tool (or only a weaker one - "delete" is not done by a list tool), the build
+ends there with the reason and no agent is created. The user never gets to click
+past a gap into an agent whose instructions promise something it cannot do.
+
 They survive a restart because the graph is compiled with the per-company
 AsyncPostgresSaver. While paused, nothing is running - the build is a row in
 t_<company>.checkpoints, under a thread id that names its owner.
@@ -39,11 +45,12 @@ from app.builder.schema import (
 from app.core.db import tenant_session
 from app.models.tenant import Agent, Connection
 from app.mcp_registry import registry
+from app.mcp_registry.risk import classify_risk
 from app.runtime.models import chat_model
 
 log = logging.getLogger(__name__)
 
-DESIGN_RULES = "You design agents for a platform. Given a request and the tools this workspace actually has, choose the SMALLEST set of tools that does the job - usually 1 to 3. Rules:\n- Use ONLY refs from the list, exactly as written.\n- Never include a tool for something the request did not ask for. 'Summarise issues' needs a list tool, not a create tool.\n- Prefer the most specific tool: read_text_file over read_file or read_media_file; list_issues over search_issues for 'my open issues'.\n- Include a write tool only if the request asks for something to be created, written, sent or posted.\n- If the job has distinct phases (gather, then act), split it into 2-3 specialists, each with only the tools for its phase, and write how the coordinator sequences them. A job that both READS (list, get, search) and then WRITES (send, post, create) is ALWAYS split: one specialist gathers, another acts, so the one that writes holds nothing else. A single-phase job gets no specialists and plain instructions instead.\n- Instructions are what the agent will be told at run time: concrete, second person, no tool names.\n- If the request needs something NO listed tool can do (e.g. posting to Slack when there is no slack tool), do not substitute another tool for it. Put it under `unmet` - the kind of server it would need (one lowercase word such as slack, github, jira) and what it was for - and design the rest without it."
+DESIGN_RULES = "You design agents for a platform. Given a request and the tools this workspace actually has, choose the SMALLEST set of tools that does the job - usually 1 to 3. Rules:\n- Use ONLY refs from the list, exactly as written.\n- Never include a tool for something the request did not ask for. 'Summarise issues' needs a list tool, not a create tool.\n- Prefer the most specific tool: read_text_file over read_file or read_media_file; list_issues over search_issues for 'my open issues'.\n- Include a write tool only if the request asks for something to be created, written, sent or posted.\n- If the job has distinct phases (gather, then act), split it into 2-3 specialists, each with only the tools for its phase, and write how the coordinator sequences them. A job that both READS (list, get, search) and then WRITES (send, post, create) is ALWAYS split: one specialist gathers, another acts, so the one that writes holds nothing else. A single-phase job gets no specialists and plain instructions instead.\n- Instructions are what the agent will be told at run time: concrete, second person, no tool names.\n- If the request needs something NO listed tool can do (e.g. posting to Slack when there is no slack tool), do not substitute another tool for it. Put it under `unmet` - the kind of server it would need (one lowercase word such as slack, github, jira) and what it was for - and design the rest without it.\n- FIRST fill `needs`: every distinct thing the request asks the agent to DO, one verb each ('list open issues' and 'delete issues' are two needs), each with the exact ref of the tool that does THAT thing. If NO tool in the list can do it, set tool_ref to null. Never substitute a tool that does something different (a list tool cannot delete; a create tool cannot delete), and never write instructions or a specialist that promise something no listed tool can do. If an action is missing because a whole KIND of server is not registered (no slack tool at all), also report it under `unmet` as above and design the rest without it. If a server you DO have simply has no tool for the action, the agent must not be built."
 
 DEFAULT_MODEL = ModelSpec(provider="google_genai", name="gemini-flash-lite-latest", temperature=0)
 
@@ -63,6 +70,7 @@ class BuildState(TypedDict, total=False):
     name: str
     description: str
     reasoning: str
+    gaps: list[str]  # things the request needs that no tool here can do - non-empty means: build nothing
     suggested: list[str]  # tool refs the model proposed
     unmet: list[dict]  # [{need, why}] - parts of the request no registered server can do
     instructions: str  # for a single agent
@@ -100,11 +108,29 @@ class UnmetNeed(BaseModel):
     why: str = Field(description="what the request wanted it for, a few words")
 
 
+class Need(BaseModel):
+    action: str = Field(
+        description="ONE thing the request wants done, as a short verb phrase: "
+        "'list open issues', 'delete issues', 'post a summary to Slack'. One verb per need."
+    )
+    tool_ref: str | None = Field(
+        default=None,
+        description="The exact 'server.tool' from the list that does THIS action, or null when NO tool "
+        "in the list can do it. Never pick a tool that does something else.",
+    )
+
+
 class Draft(BaseModel):
     """The shape we force the model into. No free-form parsing."""
 
     name: str = Field(description="Short product-style name, 2-4 words")
     description: str = Field(description="One sentence: what this agent does")
+    # Before the tools, on purpose: the model has to face "can anything here do
+    # this?" for each action before it picks tools and writes instructions.
+    needs: list[Need] = Field(
+        default_factory=list,
+        description="Every action the request asks for, each with the tool that does it (or null)",
+    )
     reasoning: str = Field(description="One sentence: why these tools")
     tool_refs: list[str] = Field(
         default_factory=list,
@@ -137,7 +163,12 @@ async def understand(state: BuildState) -> dict:
     database first so the model can only propose tools that really exist.
     """
     async with tenant_session(state["tenant"], state["user"]) as s:
-        views = await registry.list_servers(s)  # this company's + shared
+        views = await registry.list_servers(s)  # this company's + shared: enabled tools only
+        switched_off = [
+            str(t.risk)
+            for v in await registry.list_servers(s, include_disabled=True)
+            for t in v.tools if not t.enabled
+        ]
 
     catalogue = [
         {
@@ -167,6 +198,21 @@ async def understand(state: BuildState) -> dict:
         ]
     )
 
+    # Can this be built AT ALL? If the request needs something no tool here can
+    # do, say so and build nothing. Going on would save an agent whose
+    # instructions promise what it cannot deliver - the model's own "reasoning"
+    # often admits the gap in one sentence while the design ignores it.
+    have = {c["server"] for c in catalogue}
+    unmet = [{"need": _ident(u.need), "why": u.why} for u in draft.unmet if _ident(u.need) not in have]
+    gaps = [g for g in unmet_needs(draft.needs, catalogue) if not _explained_by(g, unmet)]
+    if gaps:
+        return {
+            "catalogue": catalogue,
+            "name": draft.name,
+            "gaps": gaps,
+            "log": [_cannot_build(gaps, views, _switched_off_could_help(gaps, switched_off))],
+        }
+
     valid = {c["ref"] for c in catalogue}
     suggested = [r for r in draft.tool_refs if r in valid]
     specialists = [
@@ -180,12 +226,9 @@ async def understand(state: BuildState) -> dict:
     if len(specialists) < 2:
         specialists = _split_read_write(suggested, catalogue) if not specialists else []
 
-    # What the request asked for that this person's registry cannot do. The
-    # honest answer is to say so at the first pause, not to build a smaller
-    # agent and hope nobody notices.
-    have = {c["server"] for c in catalogue}
-    unmet = [{"need": _ident(u.need), "why": u.why} for u in draft.unmet if _ident(u.need) not in have]
-
+    # `unmet` (computed above): what the request asked for that this person's
+    # registry has no SERVER for. The honest answer is to say so at the first
+    # pause, not to build a smaller agent and hope nobody notices.
     shape = (f"coordinator + {', '.join(sp['name'] for sp in specialists)}"
              if specialists else "single agent")
     line = f"Understood: {draft.name} - {shape}. {draft.reasoning}"
@@ -224,6 +267,61 @@ def _split_read_write(suggested: list[str], catalogue: list[dict]) -> list[dict]
     ]
 
 
+#: read < write < destructive: how much an action - or a tool - can change
+_POWER = {Risk.READ: 0, Risk.WRITE: 1, Risk.DESTRUCTIVE: 2}
+
+
+def unmet_needs(needs: list[Need], catalogue: list[dict]) -> list[str]:
+    """The actions the request asked for that nothing in this workspace can do.
+
+    Two ways an action is unmet:
+      * the model found no tool for it (tool_ref null), or named one that is not
+        in the catalogue - including a tool the admin switched off;
+      * it named a tool that is too weak for the words: "delete issues" is
+        destructive, and `list_issues` is a read. The same keyword table that
+        marks tools read/write/destructive reads the action's own verb, so this
+        holds even when the model is wrong about its own mapping.
+    """
+    risk_of = {c["ref"]: Risk(c["risk"]) for c in catalogue}
+    unmet: list[str] = []
+    for need in needs:
+        action = need.action.strip()
+        tool = need.tool_ref
+        if tool not in risk_of or _POWER[classify_risk(action)] > _POWER[risk_of[tool]]:
+            if action and action not in unmet:
+                unmet.append(action)
+    return unmet
+
+
+def _explained_by(action: str, unmet: list[dict]) -> bool:
+    """Is this unfulfilled action down to a whole kind of server not being
+    registered (slack, jira)? Those go to the "register it / build without it"
+    pause; only an action that a server the person HAS cannot do ends the build."""
+    a = action.lower()
+    return any(u["need"].replace("_", " ") in a or a in u["why"].lower() or u["why"].lower() in a for u in unmet)
+
+
+def _switched_off_could_help(gaps: list[str], switched_off_risks: list[str]) -> bool:
+    """Would asking the admin to switch a tool on plausibly fix this? Only if a
+    switched-off tool is at least as powerful as the action: nothing switched
+    off can "delete" when every tool that is off is a write tool."""
+    return any(
+        _POWER[Risk(r)] >= _POWER[classify_risk(g)] for g in gaps for r in set(switched_off_risks)
+    )
+
+
+def _cannot_build(gaps: list[str], views: list, any_switched_off: bool) -> str:
+    """The whole answer to a request that cannot be built, in plain words."""
+    servers = ", ".join(v.name for v in views) or "none"
+    msg = (
+        f"I can't build this agent, so I haven't created one. None of the tools you can use "
+        f"({servers}) can: {'; '.join(gaps)}."
+    )
+    if any_switched_off:
+        msg += " Some tools have been switched off by your admin - if the one you need is among them, ask them to enable it."
+    return msg + " Register a server that can do this, or change the request to what your tools can do."
+
+
 def _ident(name: str) -> str:
     """'Issue Triager' -> 'issue_triager': the identifier shape the config allows."""
     out = re.sub(r"[^a-z0-9_]+", "_", name.strip().lower()).strip("_")
@@ -238,8 +336,8 @@ def search_registry(state: BuildState) -> Command[Literal["check_connections", "
     after registering a server the request needed, which sends the build back
     to `understand` to design again against the bigger registry.
     """
-    if not state.get("catalogue"):
-        return Command(goto=END)
+    if not state.get("catalogue") or state.get("gaps"):
+        return Command(goto=END)  # nothing to build: understand() already said why
 
     chosen: list[str] | dict = interrupt(
         {

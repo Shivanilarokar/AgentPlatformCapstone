@@ -568,22 +568,24 @@ else → read
 | POST | `/auth/login` · `/auth/logout` · GET `/auth/me` | — / cookie | cookie JWT; `401 session_stale` if the company is gone |
 | GET | `/v1/servers` | any | my three-layer registry (platform admin: the Everyone layer) |
 | GET | `/v1/servers/catalogue` | any | the six vendor quick-picks |
-| POST | `/v1/servers` | any (visibility gated) | discovers via `tools/list` first; `401 auth_required / credential_rejected`, `422 unreachable` |
+| POST | `/v1/servers/discover` | any | step one of connecting: reach the server and **list** its tools with risk; saves nothing (no server, no token); each tool carries `selectable` - `false` for a destructive tool when the caller is an ordinary user |
+| POST | `/v1/servers` | any (visibility gated) | discovers via `tools/list` first; `401 auth_required / credential_rejected`, `422 unreachable`, `409 already_exists` (never overwrites); `enabled_tools` = the admin's allow-list (omit = all on; every tool is stored either way), `422` for an unknown tool name; `403 destructive_not_allowed` if an ordinary user ticks a destructive tool (omit the pick and it is simply left off) |
 | POST | `/v1/servers/{name}/refresh` | any | re-check now |
-| PATCH | `/v1/servers/{name}` | company admin | `{visibility: private\|company}` |
-| DELETE | `/v1/servers/{name}` | owner | remove my registration |
+| PATCH | `/v1/servers/{name}` | admin, owner only | edit a server I own; `enabled_tools` replaces the allow-list (no network); re-introspects only if the address or credential changed, and tools first seen then start **off**; may flip `visibility` private↔company (company admin); `403` non-admin, `404` not mine |
+| DELETE | `/v1/servers/{name}` | admin, owner only | delete a server I own and its tools (204); saved connections stay for their owners to revoke |
 | POST | `/v1/servers/health-sweep` | platform admin | run the 5-minute sweep now |
 | GET/POST | `/v1/connections` · DELETE `/{server_name}` | workspace | POST seals; nothing ever returns a secret |
 | POST | `/v1/builds` · `/v1/builds/form` | workspace | 202 `{thread_id, status: waiting\|done, interrupt, log, agent_id, config}` |
 | POST | `/v1/builds/{thread}/resume` | workspace | `{selected}` · `{action: rescan\|connected\|skip}` |
 | GET | `/v1/builds/{thread}` | workspace | what is it waiting for (survives restarts) |
 | GET | `/v1/agents` · `/v1/agents/{id}` · `/{id}/scores` | workspace | detail carries `config`, `graph`, `score`; 404 across companies |
+| DELETE | `/v1/agents/{id}` | workspace, owner only | `404` otherwise; removes runs, submissions and their checkpoints; `409` while a submission awaits review; a published listing stays |
 | POST | `/v1/agents/{id}/invoke` | cookie or `forge_` token | 202 RunOut; `awaiting_approval` with `pending` |
 | POST | `/v1/agents/{id}/runs/{run}/resume` | cookie or token | `{decision: approve\|reject}` |
 | GET | `/v1/agents/{id}/runs` · `/runs/{run}` | workspace | history |
 | POST | `/v1/agents/{id}/runs/{run}/feedback` | workspace | `{value: 1\|-1}` |
 | GET | `/v1/agents/{id}/readiness` | workspace | per-server: connected · no_credential_needed · needs_credential · not_registered |
-| POST | `/v1/agents/{id}/stream` | cookie or token | SSE: `run`, `activity`, `step`, then `ok\|awaiting_approval\|rejected\|error`; body `{input}` or `{run_id, decision}` |
+| POST | `/v1/agents/{id}/stream` | cookie or token | SSE: `run`, `activity`, `step`, then `ok\|awaiting_approval\|rejected\|error`; body `{input, history?}` or `{run_id, decision}`; `history` = the earlier `{input, output}` turns of the same chat, so a reply is read as a reply |
 | GET | `/v1/agents/{id}/postman` | workspace | v2.1 collection with a fresh token in `token` |
 | GET/POST/DELETE | `/v1/tokens` | workspace | plaintext shown once on create |
 | GET | `/v1/agents/{id}/publish/preview` | workspace | the sanitized listing + gate result |

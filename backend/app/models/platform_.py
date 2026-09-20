@@ -15,7 +15,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -91,6 +91,8 @@ class SharedTool(PlatformBase):
     description: Mapped[str] = mapped_column(Text, default="")
     input_schema: Mapped[dict] = mapped_column(JSONB, default=dict)
     risk: Mapped[str] = mapped_column(String(20))
+    #: the platform admin's allow-list, same meaning as McpTool.enabled
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
 
 
 class SubmissionIndex(PlatformBase):

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import operator
+import re
 from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -38,6 +39,42 @@ from app.runtime.models import chat_model, chat_model_with_tools
 log = logging.getLogger(__name__)
 
 MAX_TOOL_ROUNDS = 6  # per specialist, so a confused model cannot loop forever
+
+#: Added to every worker's instructions. Nothing in an agent's configuration
+#: says WHICH repository, channel or recipient it works on; that comes from the
+#: person's message. A model that is not told to ask will invent one - and a
+#: GitHub search of an invented repository returns somebody else's issues.
+NO_GUESSING = (
+    "If a tool needs a value you were not given - a repository, a channel, an address, a file path, "
+    "an ID - do NOT guess or make one up, and never use a placeholder such as my-org/my-repo, "
+    "owner/repo, example or <name>. Use what the user's task says; if it does not say, call no tool "
+    "and reply asking for exactly that value, in the form it needs. For a repository say: "
+    "'Please provide the repository name in owner/repo format.' A value the user gave earlier in the "
+    "conversation counts as given. Never say that something could not be found when you were never "
+    "given a real value for it."
+)
+
+#: What a model writes when it has no real value and fills the gap anyway:
+#: my-org, your-repo, example-org, owner/repo, <repo>, {owner}. The prompt above
+#: asks it not to; this is the check that does not depend on it obeying.
+_PLACEHOLDER = re.compile(
+    r"\b(?:my|your|example|sample)[-_ ](?:org|organi[sz]ation|owner|repo|repository|username)\b"
+    r"|\b(?:owner|org|user|username)/(?:repo|repository)\b"
+    r"|^(?:<[a-z_ -]{1,30}>|\{[a-z_ -]{1,30}\}|owner|org|repo|repository|username)$",
+    re.IGNORECASE,
+)
+
+
+def _placeholder(args: Any, key: str = "") -> tuple[str, str] | None:
+    """The first argument whose value is a placeholder rather than something the
+    user gave, as (name, value); None when every value looks real."""
+    if isinstance(args, str):
+        return (key, args) if _PLACEHOLDER.search(args.strip()) else None
+    items = args.items() if isinstance(args, dict) else enumerate(args) if isinstance(args, list) else ()
+    for k, v in items:
+        if hit := _placeholder(v, str(k)):
+            return hit
+    return None
 
 
 class RunState(TypedDict):
@@ -97,7 +134,15 @@ async def compile_agent(
     checkpointer: BaseCheckpointSaver | None = None,
 ):
     """Build a runnable graph from a config document."""
-    by_ref = {t.ref: t for t in config.tools}
+    # The admin's allow-list wins over what the configuration says: a tool they
+    # switched off after this agent was built is simply not there. Read on every
+    # compile, so a run resumed days later after a pause honours it too.
+    off = await ctx.resolve_disabled() if ctx.resolve_disabled else set()
+    dropped = off & {t.ref for t in config.tools}
+    if dropped:
+        log.warning("tools switched off in the registry, left out of this agent: %s",
+                    ", ".join(sorted(dropped)))
+    by_ref = {t.ref: t for t in config.tools if t.ref not in dropped}
     schemas = await _tool_schemas(config, ctx)
 
     # The guarded runner for each tool. EVERY call the model makes lands here.
@@ -124,7 +169,7 @@ async def compile_agent(
             # no-op when nobody streams. Never carries tool arguments.
             tell = get_stream_writer()
             messages: list[Any] = [
-                SystemMessage(f"You are '{name}'. {instructions}"),
+                SystemMessage(f"You are '{name}'. {instructions}\n\n{NO_GUESSING}"),
                 HumanMessage(
                     f"Task: {state['task']}\n\n"
                     f"What earlier steps found:\n{_context(state) or '(nothing yet)'}"
@@ -132,6 +177,8 @@ async def compile_agent(
             ]
             lines: list[str] = []
             results: dict[str, str] = {}
+            last_output = ""
+            answered = False
 
             for _ in range(MAX_TOOL_ROUNDS):
                 tell({"kind": "thinking", "worker": name})
@@ -139,6 +186,7 @@ async def compile_agent(
                 messages.append(reply)
 
                 if not reply.tool_calls:
+                    answered = True
                     if text := _text(reply):
                         lines.append(f"[{name}] {_clip(text)}")
                         results[f"{name}.summary"] = text
@@ -148,6 +196,14 @@ async def compile_agent(
                     ref = by_call_name.get(call["name"])
                     if ref is None:
                         output = f"No such tool: {call['name']}"
+                    elif bad := _placeholder(call["args"]):
+                        # Never reaches the server: an invented repository would either
+                        # fail ("could not be found") or return a stranger's issues.
+                        output = (
+                            f"Not run: {bad[0]} = {bad[1]!r} is a placeholder, not something the user "
+                            "gave. Do not guess. Reply to the user asking for the real value, in the form "
+                            "the tool needs (a repository is 'owner/repo'). Call no tool."
+                        )
                     else:
                         tell({"kind": "tool_call", "worker": name, "tool": ref,
                               "risk": str(by_ref[ref].risk), "asks": by_ref[ref].approval is Approval.ASK})
@@ -158,6 +214,27 @@ async def compile_agent(
                               "ok": not output.startswith("ERROR"), "summary": _clip(output, 140)})
                     lines.append(f"[{name}] {ref or call['name']} -> {_clip(output)}")
                     messages.append(ToolMessage(content=output, tool_call_id=call["id"]))
+                    last_output = output
+
+            if not answered:
+                # The model kept calling tools until the limit and never said anything.
+                # A run must not end as a silent "(no answer)" that reads as success:
+                # ask once, with the tools taken away, for what it found or what stopped
+                # it - and if it still will not answer, say so ourselves.
+                tell({"kind": "thinking", "worker": name})
+                messages.append(HumanMessage(
+                    "You have used all the tool calls you are allowed. Do NOT call any more tools. "
+                    "In two or three sentences say what you found, or what stopped you and what you "
+                    "need from the user to carry on."
+                ))
+                final = await bound.ainvoke(messages)
+                text = "" if final.tool_calls else _text(final)
+                text = text or (
+                    f"I used all {MAX_TOOL_ROUNDS} of my tool calls without reaching an answer. "
+                    f"The last thing a tool told me was: {_clip(last_output, 200)}"
+                )
+                lines.append(f"[{name}] {_clip(text)}")
+                results[f"{name}.summary"] = text
 
             return Command(
                 goto=goto,

@@ -147,6 +147,10 @@ export function PlaygroundTab({ agent }) {
   const [readiness, setReadiness] = useState(null);
   const [gate, setGate] = useState(null);      // the readiness card, when a run was refused
   const [pendingInput, setPendingInput] = useState("");
+  // The conversation so far: what was asked and answered in finished runs. Every
+  // run starts from nothing, so without this a reply to "which repository?" would
+  // arrive as a task of its own and the agent would ask again.
+  const [turns, setTurns] = useState([]);
   const [live, setLive] = useState([]);        // activity events for the run in progress
   const [now, setNow] = useState(null);        // the latest activity, shown under the composer
   const [score, setScore] = useState(null);
@@ -184,6 +188,9 @@ export function PlaygroundTab({ agent }) {
         else if (name === "step") { lines.push(data.line); setCurrent((c) => ({ ...c, transcript: [...lines] })); }
         else { // ok | awaiting_approval | rejected | error - the finished RunOut
           setCurrent(data);
+          if (data.status === "ok") {
+            setTurns((t) => [...t, { input: data.input.slice(0, 4000), output: (data.output ?? "").slice(0, 4000) }].slice(-6));
+          }
           setRuns((rs) => (rs.some((x) => x.id === data.id) ? rs.map((x) => (x.id === data.id ? data : x)) : [data, ...rs]));
           setNow(null);
         }
@@ -204,7 +211,11 @@ export function PlaygroundTab({ agent }) {
     }
     setGate(null);
     setInput("");
-    await drive({ input: text }, { id: "pending", input: text, status: "running", transcript: [], pending: null, output: "" });
+    await drive({ input: text, history: turns }, { id: "pending", input: text, status: "running", transcript: [], pending: null, output: "" });
+  }
+
+  function newChat() {
+    setTurns([]); setCurrent(null); setGate(null); setError(null); setInput("");
   }
 
   async function decide(decision) {
@@ -286,6 +297,14 @@ export function PlaygroundTab({ agent }) {
             {busy ? "Running…" : "Send"}
           </button>
         </div>
+        {turns.length > 0 && (
+          <div className="faint" style={{ fontSize: 12, marginTop: 8 }}>
+            Your next message continues this conversation ({turns.length} earlier {turns.length === 1 ? "turn" : "turns"} remembered).{" "}
+            <button className="linkish" style={{ padding: 0 }} onClick={newChat} disabled={busy}>
+              Start a new chat
+            </button>
+          </div>
+        )}
       </div>
 
       <div>

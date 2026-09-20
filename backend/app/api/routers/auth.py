@@ -73,7 +73,7 @@ def _set_cookie(response: Response, token: str) -> None:
 
 
 @router.post("/register", status_code=201)
-async def register(body: SignUp, response: Response, db: AsyncSession = Depends(platform_db)):
+async def register(body: SignUp, response: Response, db: AsyncSession = Depends(platform_db, scope="function")):
     """Two intents, and the company name must agree with the one you chose:
 
     * create -> the company must NOT exist yet; it is built and you are its admin
@@ -121,7 +121,7 @@ async def register(body: SignUp, response: Response, db: AsyncSession = Depends(
 
 
 @router.post("/login")
-async def login(body: SignIn, response: Response, db: AsyncSession = Depends(platform_db)):
+async def login(body: SignIn, response: Response, db: AsyncSession = Depends(platform_db, scope="function")):
     user = await db.scalar(select(User).where(func.lower(User.email) == body.email.lower()))
     if user is None or not verify_password(body.password, user.password_hash):
         # One message for both cases: never reveal which addresses exist.
@@ -146,7 +146,7 @@ async def logout(response: Response):
 
 
 @router.get("/me", response_model=Me)
-async def me(claims: Claims = Depends(current_user), db: AsyncSession = Depends(platform_db)):
+async def me(claims: Claims = Depends(current_user), db: AsyncSession = Depends(platform_db, scope="function")):
     tenant = await db.get(Tenant, claims.tenant_id) if claims.tenant_id else None
     if claims.tenant_id and tenant is None:
         # the company in this token is gone (database reset): the UI must sign in again

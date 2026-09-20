@@ -33,13 +33,28 @@ from app.models.tenant import Agent, Run
 from app.runtime.compiler import compile_agent
 from app.runtime.guarded_tool import RunContext
 from app.tenancy.checkpointers import checkpointer_for
-from app.vault.resolver import registry_endpoints, vault_resolver
+from app.vault.resolver import registry_disabled, registry_endpoints, vault_resolver
 
 router = APIRouter(prefix="/v1/agents/{agent_id}", tags=["runs"])
 
 
+MAX_HISTORY = 6  # earlier turns that are carried along; older ones are dropped
+
+
+class Turn(BaseModel):
+    """One earlier exchange of the same conversation."""
+
+    input: str = Field(max_length=4000)
+    output: str = Field(default="", max_length=4000)
+
+
 class InvokeIn(BaseModel):
     input: str = Field(min_length=1, max_length=4000)
+    #: The earlier turns of this conversation, oldest first. Every run starts
+    #: from nothing, so a reply to a question ("which repository?") would arrive
+    #: as a task with no context - the agent would ask again, forever. Sending
+    #: the turns lets the reply be read as a reply.
+    history: list[Turn] = Field(default_factory=list, max_length=20)
 
 
 class ResumeIn(BaseModel):
@@ -101,6 +116,7 @@ async def _graph(claims: Claims, agent: Agent, thread_id: str):
         thread_id=thread_id,
         resolve_token=vault_resolver(claims.tenant_key, claims.user_id),
         resolve_endpoint=registry_endpoints(claims.tenant_key, claims.user_id),
+        resolve_disabled=registry_disabled(claims.tenant_key, claims.user_id),
     )
     return await compile_agent(cfg, ctx, checkpointer=await checkpointer_for(claims.tenant_key))
 
@@ -129,8 +145,23 @@ def _apply(run: Run, result: dict[str, Any], started: float) -> None:
     run.status = "rejected" if rejected else "ok"
 
 
-def _state(run: Run) -> dict:
-    return {"task": run.input, "transcript": [], "finished": [], "results": {}}
+def _task(text: str, history: list[Turn] | tuple = ()) -> str:
+    """What the workers are told the task is. On its own when there is no history;
+    otherwise the recent conversation first, so a value given earlier (a
+    repository, a channel) still counts as given."""
+    if not history:
+        return text
+    earlier = "\n".join(f"User: {t.input}\nAgent: {t.output}" for t in list(history)[-MAX_HISTORY:])
+    return (
+        f"Earlier in this conversation:\n{earlier}\n\n"
+        f"The user's new message: {text}\n\n"
+        "Read the new message as a reply to that conversation and carry on with the job it started. "
+        "Anything the user already said there - a repository, a channel, a recipient - counts as given."
+    )
+
+
+def _state(run: Run, history: list[Turn] | tuple = ()) -> dict:
+    return {"task": _task(run.input, history), "transcript": [], "finished": [], "results": {}}
 
 
 # ------------------------------------------------------------------ routes
@@ -139,7 +170,7 @@ def _state(run: Run) -> dict:
 @router.post("/invoke", response_model=RunOut, status_code=202)
 async def invoke(
     agent_id: UUID, body: InvokeIn, request: Request,
-    claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db),
+    claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db, scope="function"),
 ):
     agent = await _agent(db, agent_id)
     # a browser session is the playground; a `forge_` API token is the public API
@@ -152,7 +183,7 @@ async def invoke(
     graph = await _graph(claims, agent, run.thread_id)
     started = time.perf_counter()
     try:
-        result = await graph.ainvoke(_state(run), config={"configurable": {"thread_id": run.thread_id}})
+        result = await graph.ainvoke(_state(run, body.history), config={"configurable": {"thread_id": run.thread_id}})
         _apply(run, result, started)
     except Exception as exc:  # noqa: BLE001 - the run fails; the platform does not
         run.status, run.output = "error", f"{type(exc).__name__}: {str(exc)[:300]}"
@@ -164,7 +195,7 @@ async def invoke(
 @router.post("/runs/{run_id}/resume", response_model=RunOut, status_code=202)
 async def resume(
     agent_id: UUID, run_id: UUID, body: ResumeIn,
-    claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db),
+    claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db, scope="function"),
 ):
     """Answer the approval. This is the Approve / Reject button in the chat."""
     agent = await _agent(db, agent_id)
@@ -187,19 +218,19 @@ async def resume(
 
 
 @router.get("/runs", response_model=list[RunOut])
-async def list_runs(agent_id: UUID, db: AsyncSession = Depends(tenant_db)):
+async def list_runs(agent_id: UUID, db: AsyncSession = Depends(tenant_db, scope="function")):
     await _agent(db, agent_id)
     rows = await db.scalars(select(Run).where(Run.agent_id == agent_id).order_by(Run.started_at.desc()))
     return [_out(r) for r in rows]
 
 
 @router.get("/runs/{run_id}", response_model=RunOut)
-async def get_run(agent_id: UUID, run_id: UUID, db: AsyncSession = Depends(tenant_db)):
+async def get_run(agent_id: UUID, run_id: UUID, db: AsyncSession = Depends(tenant_db, scope="function")):
     return _out(await _run(db, agent_id, run_id))
 
 
 @router.post("/runs/{run_id}/feedback", response_model=RunOut)
-async def feedback(agent_id: UUID, run_id: UUID, body: FeedbackIn, db: AsyncSession = Depends(tenant_db)):
+async def feedback(agent_id: UUID, run_id: UUID, body: FeedbackIn, db: AsyncSession = Depends(tenant_db, scope="function")):
     run = await _run(db, agent_id, run_id)
     run.feedback = body.value or None
     await db.flush()

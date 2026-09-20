@@ -138,7 +138,7 @@ async def _company_name(tenant_id: str) -> str:
 
 
 @router.get("/v1/agents/{agent_id}/publish/preview", response_model=Preview)
-async def preview(agent_id: UUID, claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db)):
+async def preview(agent_id: UUID, claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db, scope="function")):
     agent = await db.scalar(select(Agent).where(Agent.id == agent_id))
     if agent is None:
         raise HTTPException(404, detail=NOT_FOUND)
@@ -150,7 +150,7 @@ async def preview(agent_id: UUID, claims: Claims = Depends(workspace_user), db: 
 
 
 @router.post("/v1/agents/{agent_id}/publish", response_model=SubmissionOut, status_code=202)
-async def publish(agent_id: UUID, claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db)):
+async def publish(agent_id: UUID, claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db, scope="function")):
     """Rule 6 made to matter: below the threshold this is a 409 that names the check."""
     agent = await db.scalar(select(Agent).where(Agent.id == agent_id))
     if agent is None:
@@ -195,7 +195,7 @@ async def publish(agent_id: UUID, claims: Claims = Depends(workspace_user), db: 
 
 
 @router.get("/v1/agents/{agent_id}/submissions", response_model=list[SubmissionOut])
-async def submissions(agent_id: UUID, db: AsyncSession = Depends(tenant_db)):
+async def submissions(agent_id: UUID, db: AsyncSession = Depends(tenant_db, scope="function")):
     rows = await db.scalars(select(Submission).where(Submission.agent_id == agent_id)
                             .order_by(Submission.submitted_at.desc()))
     return [_sub_out(s) for s in rows]
@@ -205,7 +205,7 @@ async def submissions(agent_id: UUID, db: AsyncSession = Depends(tenant_db)):
 
 
 @router.get("/v1/review", response_model=list[QueueItem])
-async def queue(_: Claims = Depends(require_platform_admin), db: AsyncSession = Depends(platform_db)):
+async def queue(_: Claims = Depends(require_platform_admin), db: AsyncSession = Depends(platform_db, scope="function")):
     rows = await db.scalars(select(SubmissionIndex).order_by(SubmissionIndex.submitted_at.asc()))
     now = datetime.now(timezone.utc)
     return [
@@ -221,7 +221,7 @@ async def queue(_: Claims = Depends(require_platform_admin), db: AsyncSession = 
 
 @router.post("/v1/review/{submission_id}/decide", response_model=QueueItem)
 async def decide(submission_id: UUID, body: DecideIn, _: Claims = Depends(require_platform_admin),
-                 db: AsyncSession = Depends(platform_db)):
+                 db: AsyncSession = Depends(platform_db, scope="function")):
     """Resume the parked run in the author's company. Approve publishes;
     changes / reject go back to the author with the notes."""
     idx = await db.scalar(select(SubmissionIndex).where(SubmissionIndex.submission_id == submission_id))
@@ -246,7 +246,7 @@ async def decide(submission_id: UUID, body: DecideIn, _: Claims = Depends(requir
 
 
 @router.get("/v1/listings", response_model=list[ListingOut])
-async def listings(_: Claims = Depends(current_user), db: AsyncSession = Depends(platform_db)):
+async def listings(_: Claims = Depends(current_user), db: AsyncSession = Depends(platform_db, scope="function")):
     rows = await db.scalars(select(Listing).order_by(Listing.published_at.desc()))
     return [_listing_out(l) for l in rows]
 
@@ -273,7 +273,7 @@ async def _connection_status(db: AsyncSession, cfg: dict) -> dict[str, str]:
 
 
 @router.get("/v1/listings/{listing_id}", response_model=ListingDetail)
-async def listing(listing_id: UUID, claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db)):
+async def listing(listing_id: UUID, claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db, scope="function")):
     async with platform_session() as p:
         row = await p.get(Listing, listing_id)
         if row is None:
@@ -285,7 +285,7 @@ async def listing(listing_id: UUID, claims: Claims = Depends(workspace_user), db
 
 
 @router.post("/v1/listings/{listing_id}/install", response_model=InstallOut, status_code=201)
-async def install(listing_id: UUID, claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db)):
+async def install(listing_id: UUID, claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db, scope="function")):
     """Install. The sanitized design becomes a brand-new agent in MY schema, owned
     by me (row-level security stamps the owner). It references servers by NAME,
     so it resolves to MY connections at run time. The publisher's agent, runs

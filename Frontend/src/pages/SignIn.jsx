@@ -68,12 +68,12 @@ export default function SignIn() {
               Sign in
             </button>
             <button className={signup ? "on" : ""} onClick={() => setMode("signup")} type="button">
-              Sign up
+              Register
             </button>
           </div>
 
           <h2 style={{ margin: "0 0 4px", fontSize: 19, fontWeight: 640 }}>
-            {signup ? "Sign up" : "Sign in"}
+            {signup ? "Register" : "Sign in"}
           </h2>
           <p className="muted" style={{ margin: "0 0 18px", fontSize: 13 }}>
             {signup

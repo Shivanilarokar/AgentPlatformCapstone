@@ -7,8 +7,9 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
-import { ago, get, post } from "../api";
+import { ago, del, get, post } from "../api";
 import { Badge, Card, Check, Note, SectionTitle } from "../ui";
 
 const SUB_TONE = { pending: "warn", approved: "ok", changes_requested: "", rejected: "danger" };
@@ -20,6 +21,9 @@ export function SettingsTab({ agent, onChanged }) {
   const [showListing, setShowListing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+  const navigate = useNavigate();
 
   const load = useCallback(async () => {
     const [p, s] = await Promise.all([
@@ -39,6 +43,22 @@ export function SettingsTab({ agent, onChanged }) {
       onChanged?.();
     } catch (e) { setError(e.message); }
     setBusy(false);
+  }
+
+  async function remove() {
+    const published = agent.status === "live"
+      ? " Its copy in the Marketplace stays; only the platform admin can take that down." : "";
+    if (!window.confirm(
+      `Delete "${agent.name}"? Its runs and submissions are deleted with it, and this can't be undone.${published}`
+    )) return;
+    setDeleting(true); setDeleteError(null);
+    try {
+      await del(`/v1/agents/${agent.id}`);
+      navigate("/agents");
+    } catch (e) {
+      setDeleteError(e.message);
+      setDeleting(false);
+    }
   }
 
   if (!preview) return <div className="muted">Loading…</div>;
@@ -139,6 +159,25 @@ export function SettingsTab({ agent, onChanged }) {
           )}
         </>
       )}
+
+      <SectionTitle>Delete this agent</SectionTitle>
+      <Card>
+        <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+          Removes the agent, its runs and its submissions. Your connections are not touched.
+          {agent.status === "live" && " The copy already published to the Marketplace stays."}
+        </p>
+        <button className="btn" style={{ color: "var(--danger)" }} onClick={remove}
+                disabled={deleting || !!pending}
+                title={pending ? "Waiting for the platform admin's review" : ""}>
+          {deleting ? "Deleting…" : "Delete agent"}
+        </button>
+        {pending && (
+          <span className="faint" style={{ fontSize: 12, marginLeft: 10 }}>
+            You can delete it once the platform admin has answered.
+          </span>
+        )}
+        {deleteError && <div className="note warn" style={{ marginTop: 10 }}>{deleteError}</div>}
+      </Card>
     </div>
   );
 }

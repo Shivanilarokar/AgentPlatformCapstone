@@ -7,16 +7,68 @@
  * not to an agent, not to a log.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { ago, del, get, post } from "../api";
 import { Badge, Card, Check, Field, Loading, SectionTitle, TopBar } from "../ui";
 
+const PLACEHOLDER = { github: "ghp_…", slack: "xoxp-…", jira: "ATATT…" };
+
 function statusBadge(status) {
   if (status === "active") return <Badge tone="ok" dot>active</Badge>;
   if (status === "revoked") return <Badge tone="danger" dot>revoked</Badge>;
   return <Badge tone="warn" dot>{status}</Badge>;
+}
+
+/* Under a revoked row. Revoking wiped the stored secret, so there is nothing to
+ * retry: ask for a token. The API tries it against the server first and saves
+ * nothing if it is refused, so a right token reconnects and a wrong one says so. */
+function ReconnectRow({ name, onDone, onCancel }) {
+  const [secret, setSecret] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function reconnect() {
+    if (!secret || busy) return;
+    setBusy(true); setError(null);
+    try {
+      await post("/v1/connections", { server_name: name, secret });
+      setSecret(""); // gone from this component too
+      await onDone();
+    } catch (e) {
+      setError(e.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <tr>
+      <td colSpan={6} style={{ background: "var(--surface-2)", padding: "12px 14px" }}>
+        <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>
+          The old token was wiped when you revoked it. Paste a token for <b>{name}</b>. It is
+          checked with the server first, and saved only if the server accepts it.
+        </div>
+        <div className="row" style={{ gap: 8, alignItems: "center" }}>
+          <div className="fld" style={{ flex: 1, marginBottom: 0 }}>
+            <input type="password" className="mono" value={secret} autoFocus autoComplete="off"
+                   onChange={(e) => setSecret(e.target.value)}
+                   onKeyDown={(e) => e.key === "Enter" && reconnect()}
+                   placeholder={PLACEHOLDER[name] ?? "paste the token"} />
+          </div>
+          <button className="btn primary sm" onClick={reconnect} disabled={busy || !secret}>
+            {busy ? "Checking…" : "Reconnect"}
+          </button>
+          <button className="btn sm" onClick={onCancel} disabled={busy}>Cancel</button>
+        </div>
+        {error && (
+          <div className="note warn" style={{ marginTop: 10 }}>
+            <b>Nothing was saved.</b> {error}
+          </div>
+        )}
+      </td>
+    </tr>
+  );
 }
 
 function AddForm({ catalogue, connections, onAdded, onCancel, initialName }) {
@@ -52,7 +104,7 @@ function AddForm({ catalogue, connections, onAdded, onCancel, initialName }) {
       <div className="mh">
         <div style={{ fontWeight: 650, fontSize: 14.5 }}>Add a connection</div>
         <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
-          Encrypted the moment you save it. You will not see it again.
+          Checked with the server first, then encrypted the moment you save it. You will not see it again.
         </div>
       </div>
       <div className="mb">
@@ -89,14 +141,18 @@ function AddForm({ catalogue, connections, onAdded, onCancel, initialName }) {
         <Field label="Credential" hint="(stored encrypted, never shown again)">
           <input type="password" className="mono" value={secret} autoComplete="off"
                  onChange={(e) => setSecret(e.target.value)}
-                 placeholder={{ github: "ghp_…", slack: "xoxp-…", jira: "ATATT…" }[name] ?? "paste the token"} />
+                 placeholder={PLACEHOLDER[name] ?? "paste the token"} />
         </Field>
 
-        {error && <div className="note warn" style={{ marginBottom: 12 }}>{error}</div>}
+        {error && (
+          <div className="note warn" style={{ marginBottom: 12 }}>
+            <b>Nothing was saved.</b> {error}
+          </div>
+        )}
 
         <div className="row">
           <button className="btn primary sm" onClick={save} disabled={busy || !secret || !name}>
-            {busy ? "Encrypting…" : "Save connection"}
+            {busy ? "Checking…" : "Save connection"}
           </button>
           <button className="btn sm" onClick={onCancel}>Cancel</button>
         </div>
@@ -115,6 +171,7 @@ export default function Connections() {
   const [params, setParams] = useSearchParams();
   const requested = params.get("add");
   const [adding, setAdding] = useState(Boolean(requested));
+  const [reconnecting, setReconnecting] = useState(null); // server name whose token field is open
 
   const load = useCallback(async () => {
     try {
@@ -135,6 +192,11 @@ export default function Connections() {
 
   async function revoke(name) {
     await del(`/v1/connections/${name}`);
+    await load();
+  }
+
+  async function reconnected() {
+    setReconnecting(null);
     await load();
   }
 
@@ -179,18 +241,30 @@ export default function Connections() {
                 </tr>
               )}
               {connections.map((c) => (
-                <tr key={c.server_name}>
-                  <td><b>{c.server_name}</b></td>
-                  <td>{statusBadge(c.status)}</td>
-                  <td className="mono faint">{c.secret}</td>
-                  <td className="muted">{ago(c.created_at)}</td>
-                  <td className="muted">{ago(c.last_used_at)}</td>
-                  <td>
-                    {c.status === "active" && (
-                      <button className="btn sm" onClick={() => revoke(c.server_name)}>Revoke</button>
-                    )}
-                  </td>
-                </tr>
+                <Fragment key={c.server_name}>
+                  <tr>
+                    <td><b>{c.server_name}</b></td>
+                    <td>{statusBadge(c.status)}</td>
+                    <td className="mono faint">{c.secret}</td>
+                    <td className="muted">{ago(c.created_at)}</td>
+                    <td className="muted">{ago(c.last_used_at)}</td>
+                    <td>
+                      {c.status === "active" && (
+                        <button className="btn sm" onClick={() => revoke(c.server_name)}>Revoke</button>
+                      )}
+                      {c.status === "revoked" && (
+                        <button className="btn sm" onClick={() => setReconnecting(c.server_name)}
+                                disabled={reconnecting === c.server_name}>
+                          Reconnect
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                  {c.status === "revoked" && reconnecting === c.server_name && (
+                    <ReconnectRow name={c.server_name} onDone={reconnected}
+                                  onCancel={() => setReconnecting(null)} />
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -224,7 +298,8 @@ export default function Connections() {
           <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
             Revoking wipes the encrypted_secret but keeps the row. An agent that needed it goes{" "}
             <Badge tone="danger" dot>degraded</Badge> — it still answers, still uses its other
-            tools, and reports the one that is broken. It must not crash.
+            tools, and reports the one that is broken. It must not crash. Press{" "}
+            <b>Reconnect</b> on a revoked row and paste a token to bring it back.
           </p>
           <Link className="btn sm" to="/registry">Back to the registry →</Link>
         </Card>

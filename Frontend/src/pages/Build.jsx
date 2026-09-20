@@ -21,17 +21,17 @@ const STEPS = [
   ["done", "Build and deploy", "Write the config, create the agent"],
 ];
 
-function Steps({ at }) {
+function Steps({ at, stopped }) {
   const order = STEPS.map(([k]) => k);
   const now = order.indexOf(at);
   return (
     <div className="steps">
       <div className="section-title" style={{ marginTop: 0 }}>Builder graph</div>
       {STEPS.map(([key, label, sub], i) => {
-        const state = i < now ? "done" : i === now ? "now" : "todo";
+        const state = i < now ? "done" : i === now ? (stopped ? "stop" : "now") : "todo";
         return (
           <div className={`step ${state}`} key={key}>
-            <div className="n">{state === "done" ? "✓" : i + 1}</div>
+            <div className="n">{state === "done" ? "✓" : state === "stop" ? "✕" : i + 1}</div>
             <div>
               <div className="lb">{label}</div>
               <div className="sd">{sub}</div>
@@ -153,7 +153,63 @@ function SelectTools({ payload, onAnswer, busy }) {
 
 /* ---------------------------------------------------------- interrupt 2 */
 
+/* One missing server, connected right here in the chat. The token goes to the
+ * same API as the Connections page, which tries it against the server first and
+ * saves nothing if it is refused. On success the build is told to look again,
+ * so it carries on from this exact pause - the user never leaves the screen. */
+const PLACEHOLDER = { github: "ghp_…", slack: "xoxp-…", jira: "ATATT…" };
+
+function ConnectHere({ name, hint, onConnected, disabled }) {
+  const [secret, setSecret] = useState("");
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function connect() {
+    if (!secret || working) return;
+    setWorking(true); setError(null);
+    try {
+      await post("/v1/connections", { server_name: name, secret });
+      setSecret(""); // gone from this component as soon as it is stored
+      await onConnected();
+    } catch (e) {
+      setError(e.message);
+    }
+    setWorking(false);
+  }
+
+  return (
+    <div style={{ margin: "0 0 12px" }}>
+      <div className="muted" style={{ fontSize: 12.5, marginBottom: 6 }}>
+        Paste a token for <b>{name}</b>. {hint}
+      </div>
+      <div className="row" style={{ gap: 8, alignItems: "center" }}>
+        <div className="fld" style={{ flex: 1, marginBottom: 0 }}>
+          <input type="password" className="mono" value={secret} autoComplete="off"
+                 onChange={(e) => setSecret(e.target.value)}
+                 onKeyDown={(e) => e.key === "Enter" && connect()}
+                 placeholder={PLACEHOLDER[name] ?? "paste the token"} disabled={disabled || working} />
+        </div>
+        <button className="btn primary sm" onClick={connect} disabled={disabled || working || !secret}>
+          {working ? "Checking…" : `Connect ${name}`}
+        </button>
+      </div>
+      {error && (
+        <div className="note warn" style={{ marginTop: 8 }}>
+          <b>Nothing was saved.</b> {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MissingConnection({ payload, onAnswer, busy }) {
+  const [hints, setHints] = useState({});
+  useEffect(() => {
+    get("/v1/servers/catalogue")
+      .then((cs) => setHints(Object.fromEntries(cs.map((c) => [c.name, c.credential_hint || ""]))))
+      .catch(() => {});
+  }, []);
+
   return (
     <div className="interrupt">
       <div className="ihead">
@@ -178,18 +234,16 @@ function MissingConnection({ payload, onAnswer, busy }) {
 
         <hr className="sep" style={{ margin: "8px 0 12px" }} />
         <p className="muted" style={{ margin: "0 0 10px" }}>
-          Add one to carry on. It is encrypted when you save it and is never written into
-          the agent's configuration.
+          Add one to carry on, right here. It is checked with the server, encrypted when you
+          save it, and never written into the agent's configuration.
         </p>
 
+        {payload.missing.map((name) => (
+          <ConnectHere key={name} name={name} hint={hints[name]} disabled={busy}
+                       onConnected={() => onAnswer({ action: "connected" })} />
+        ))}
+
         <div className="row">
-          <Link className="btn primary sm" to={`/connections?add=${payload.missing[0]}`}>
-            Connect {payload.missing[0]}
-          </Link>
-          <button className="btn sm" disabled={busy}
-                  onClick={() => onAnswer({ action: "connected" })}>
-            I have connected it
-          </button>
           <button className="btn sm" disabled={busy}
                   onClick={() => onAnswer({ action: "skip" })}>
             Skip — build without it
@@ -247,7 +301,10 @@ export default function Build() {
   }, [state?.status, state?.agent_id]);
 
   const kind = state?.interrupt?.type;
-  const at = !state ? "understand"
+  // A refused build (nothing to do) stopped at the first step: it never got to
+  // picking tools or checking connections, so those must not show as done.
+  const refused = state?.status === "nothing_to_do";
+  const at = !state || refused ? "understand"
     : kind === "select_tools" ? "select"
     : kind === "missing_connection" ? "connections"
     : "done";
@@ -376,7 +433,7 @@ export default function Build() {
             )}
           </div>
 
-          <Steps at={at} />
+          <Steps at={at} stopped={refused} />
         </div>
       </div>
     </>
