@@ -47,7 +47,7 @@ def _out(c) -> ConnectionOut:
 
 
 @router.get("", response_model=list[ConnectionOut])
-async def list_connections(db: AsyncSession = Depends(tenant_db)):
+async def list_connections(db: AsyncSession = Depends(tenant_db, scope="function")):
     return [_out(c) for c in await connections.list_connections(db)]
 
 
@@ -55,7 +55,7 @@ async def list_connections(db: AsyncSession = Depends(tenant_db)):
 async def add_connection(
     body: AddIn,
     claims: Claims = Depends(current_user),
-    db: AsyncSession = Depends(tenant_db),
+    db: AsyncSession = Depends(tenant_db, scope="function"),
 ):
     if body.server_name not in CATALOGUE:
         raise HTTPException(404, detail=NOT_FOUND)
@@ -94,7 +94,7 @@ async def add_connection(
 
 
 @router.delete("/{server_name}", response_model=ConnectionOut)
-async def revoke_connection(server_name: str, db: AsyncSession = Depends(tenant_db)):
+async def revoke_connection(server_name: str, db: AsyncSession = Depends(tenant_db, scope="function")):
     """Revoke, do not delete. Agents that used it must degrade, not vanish."""
     try:
         conn = await connections.revoke(db, server_name)

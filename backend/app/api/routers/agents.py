@@ -82,7 +82,7 @@ async def _scored(db: AsyncSession, row: Agent) -> AgentCard:
 
 
 @router.get("", response_model=list[AgentCard])
-async def list_agents(db: AsyncSession = Depends(tenant_db)):
+async def list_agents(db: AsyncSession = Depends(tenant_db, scope="function")):
     # No tenant filter and no owner filter: the gate chose the schema, and
     # row-level security leaves only this person's rows.
     rows = await db.scalars(select(Agent).order_by(Agent.created_at.desc()))
@@ -90,7 +90,7 @@ async def list_agents(db: AsyncSession = Depends(tenant_db)):
 
 
 @router.get("/{agent_id}", response_model=AgentDetail)
-async def get_agent(agent_id: UUID, db: AsyncSession = Depends(tenant_db)):
+async def get_agent(agent_id: UUID, db: AsyncSession = Depends(tenant_db, scope="function")):
     row = await db.scalar(select(Agent).where(Agent.id == agent_id))
     if row is None:
         # Another company's id is simply not in this schema. 404, never 403 -
@@ -105,7 +105,7 @@ async def get_agent(agent_id: UUID, db: AsyncSession = Depends(tenant_db)):
 
 @router.delete("/{agent_id}", status_code=204)
 async def delete_agent(agent_id: UUID, claims: Claims = Depends(workspace_user),
-                       db: AsyncSession = Depends(tenant_db)):
+                       db: AsyncSession = Depends(tenant_db, scope="function")):
     """Delete an agent I own, with its runs and its submissions.
 
     Only the owner can: row-level security leaves nobody else a row to find, so
@@ -154,7 +154,7 @@ async def delete_agent(agent_id: UUID, claims: Claims = Depends(workspace_user),
 
 
 @router.get("/{agent_id}/scores")
-async def get_scores(agent_id: UUID, db: AsyncSession = Depends(tenant_db)):
+async def get_scores(agent_id: UUID, db: AsyncSession = Depends(tenant_db, scope="function")):
     """Both numbers and every check behind them. This is what Publish reads."""
     row = await db.scalar(select(Agent).where(Agent.id == agent_id))
     if row is None:

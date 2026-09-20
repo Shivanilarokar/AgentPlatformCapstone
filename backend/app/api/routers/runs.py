@@ -140,7 +140,7 @@ def _state(run: Run) -> dict:
 @router.post("/invoke", response_model=RunOut, status_code=202)
 async def invoke(
     agent_id: UUID, body: InvokeIn, request: Request,
-    claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db),
+    claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db, scope="function"),
 ):
     agent = await _agent(db, agent_id)
     # a browser session is the playground; a `forge_` API token is the public API
@@ -165,7 +165,7 @@ async def invoke(
 @router.post("/runs/{run_id}/resume", response_model=RunOut, status_code=202)
 async def resume(
     agent_id: UUID, run_id: UUID, body: ResumeIn,
-    claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db),
+    claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(tenant_db, scope="function"),
 ):
     """Answer the approval. This is the Approve / Reject button in the chat."""
     agent = await _agent(db, agent_id)
@@ -188,19 +188,19 @@ async def resume(
 
 
 @router.get("/runs", response_model=list[RunOut])
-async def list_runs(agent_id: UUID, db: AsyncSession = Depends(tenant_db)):
+async def list_runs(agent_id: UUID, db: AsyncSession = Depends(tenant_db, scope="function")):
     await _agent(db, agent_id)
     rows = await db.scalars(select(Run).where(Run.agent_id == agent_id).order_by(Run.started_at.desc()))
     return [_out(r) for r in rows]
 
 
 @router.get("/runs/{run_id}", response_model=RunOut)
-async def get_run(agent_id: UUID, run_id: UUID, db: AsyncSession = Depends(tenant_db)):
+async def get_run(agent_id: UUID, run_id: UUID, db: AsyncSession = Depends(tenant_db, scope="function")):
     return _out(await _run(db, agent_id, run_id))
 
 
 @router.post("/runs/{run_id}/feedback", response_model=RunOut)
-async def feedback(agent_id: UUID, run_id: UUID, body: FeedbackIn, db: AsyncSession = Depends(tenant_db)):
+async def feedback(agent_id: UUID, run_id: UUID, body: FeedbackIn, db: AsyncSession = Depends(tenant_db, scope="function")):
     run = await _run(db, agent_id, run_id)
     run.feedback = body.value or None
     await db.flush()

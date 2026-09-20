@@ -61,7 +61,7 @@ def _tok(t: ApiToken, plain: str | None = None) -> TokenOut:
 
 
 @router.post("/v1/tokens", response_model=TokenOut, status_code=201)
-async def create_token(body: TokenIn, claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(platform_db)):
+async def create_token(body: TokenIn, claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(platform_db, scope="function")):
     plain, digest, prefix = new_api_token()
     row = ApiToken(user_id=UUID(claims.user_id), name=body.name or "api", token_hash=digest, prefix=prefix)
     db.add(row)
@@ -71,14 +71,14 @@ async def create_token(body: TokenIn, claims: Claims = Depends(workspace_user), 
 
 
 @router.get("/v1/tokens", response_model=list[TokenOut])
-async def list_tokens(claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(platform_db)):
+async def list_tokens(claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(platform_db, scope="function")):
     rows = await db.scalars(select(ApiToken).where(
         ApiToken.user_id == UUID(claims.user_id), ApiToken.revoked_at.is_(None)).order_by(ApiToken.created_at.desc()))
     return [_tok(t) for t in rows]
 
 
 @router.delete("/v1/tokens/{token_id}", status_code=204)
-async def revoke_token(token_id: UUID, claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(platform_db)):
+async def revoke_token(token_id: UUID, claims: Claims = Depends(workspace_user), db: AsyncSession = Depends(platform_db, scope="function")):
     row = await db.scalar(select(ApiToken).where(ApiToken.id == token_id, ApiToken.user_id == UUID(claims.user_id)))
     if row is None:
         raise HTTPException(404, detail=NOT_FOUND)
@@ -95,7 +95,7 @@ class Readiness(BaseModel):
 
 
 @router.get("/v1/agents/{agent_id}/readiness", response_model=Readiness)
-async def readiness(agent_id: UUID, db: AsyncSession = Depends(tenant_db)):
+async def readiness(agent_id: UUID, db: AsyncSession = Depends(tenant_db, scope="function")):
     """Before a run: does THIS person have what this agent needs? The Playground
     asks this first and, if something is missing, asks for the connection
     instead of running degraded."""
@@ -200,7 +200,7 @@ def _sse(event: str, data: dict) -> str:
 
 @router.get("/v1/agents/{agent_id}/postman")
 async def postman(agent_id: UUID, request: Request, claims: Claims = Depends(workspace_user),
-                  db: AsyncSession = Depends(tenant_db)):
+                  db: AsyncSession = Depends(tenant_db, scope="function")):
     """A Postman v2.1 collection for this agent. The `token` variable is a fresh
     API token minted for this download, so the collection works as-is: import,
     open Invoke, Send."""
