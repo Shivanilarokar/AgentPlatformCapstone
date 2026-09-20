@@ -13,12 +13,37 @@ admin's review — lets another company install it with their own credentials.
 [Brief](https://fnusatvik07.github.io/agent-platform-capstone/brief.html) ·
 [Architecture](docs/ARCHITECTURE.md) ·
 [HLD / LLD](docs/DESIGN.md) ·
+[Design document](docs/DESIGN-DOCUMENT.md) ·
 [Backend code walkthrough](docs/BACKEND.md) ·
 [Verify in the database](docs/VERIFY.md) ·
 [Editable diagrams (.drawio)](docs/architecture.drawio) ·
 [Technical report (.docx)](docs/Forge-Complete-Technical-Report.docx)
 
 </div>
+
+---
+
+## Start it
+
+```bash
+git clone https://github.com/Shivanilarokar/AgentPlatformCapstone.git && cd AgentPlatformCapstone
+cp .env.example .env              # put your free Gemini key in GOOGLE_API_KEY (https://aistudio.google.com/apikey)
+docker compose up -d --build      # db · api · frontend · pgadmin — nothing else to install
+```
+
+Open <http://localhost:5173>. No paid accounts are needed anywhere.
+
+## Log in
+
+| Who | Email | Password | What they can do |
+|---|---|---|---|
+| Platform admin | `admin@forge.dev` | `Passw0rd!` | share servers with everyone, review the marketplace (created at startup from `.env`) |
+| Company admin | `shivani@northwind.example` | `Passw0rd!` | everything a user can + share a server with the whole company |
+| User | `priya@northwind.example` | `Passw0rd!` | register servers, connect, build, test, publish, install |
+| Another company | `jai@maven.example` / `riya@maven.example` | `Passw0rd!` | for step 6 — the marketplace install |
+
+Or sign up: **Create a new company** makes you its admin; **Join an existing company** (exact name)
+makes you a user. On a fresh database only `admin@forge.dev` exists — sign the others up in the UI.
 
 ---
 
@@ -69,21 +94,10 @@ More: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (plain language),
 
 ---
 
-## Run it
+## Running it — the details
 
-You need **Docker Desktop**, **uv** (<https://docs.astral.sh/uv/>) and a free **Gemini API key**
-(<https://aistudio.google.com/apikey>). Node is only needed if you want to lint or build the UI
-outside Docker.
-
-```bash
-git clone https://github.com/Shivanilarokar/AgentPlatformCapstone.git
-cd AgentPlatformCapstone
-
-cp .env.example .env            # then put your GOOGLE_API_KEY in it (never commit .env)
-
-docker compose up -d --build    # db · api · frontend · pgadmin
-uv sync --extra dev             # only for running the tests on the host
-```
+Prerequisites: **Docker Desktop**; **uv** (<https://docs.astral.sh/uv/>) only for running the
+tests on the host (`uv sync --extra dev`); Node only if you want to build the UI outside Docker.
 
 | URL | What | Sign in |
 |---|---|---|
@@ -95,22 +109,8 @@ uv sync --extra dev             # only for running the tests on the host
 `backend/app` and `Frontend/` are bind-mounted: edit locally, the containers reload. Rebuild
 (`--build`) only when `pyproject.toml`, `Dockerfile` or `Frontend/package.json` change.
 
-### Accounts
-
-The **platform admin** is created at startup from `.env` (`PLATFORM_ADMIN_EMAIL` /
-`PLATFORM_ADMIN_PASSWORD`, default `admin@forge.dev` / `Passw0rd!`). It belongs to no company,
-shares servers with everyone, and reviews the marketplace.
-
-Everyone else signs up: **Create a new company** makes you its `admin`; **Join an existing
-company** (exact name) makes you a `user`. The demo data uses:
-
-| Email | Password | Role |
-|---|---|---|
-| `admin@forge.dev` | `Passw0rd!` | platform admin |
-| `shivani@northwind.example` | `Passw0rd!` | admin, Northwind Labs |
-| `priya@northwind.example` | `Passw0rd!` | user, Northwind Labs |
-| `jai@maven.example` | `Passw0rd!` | admin, Maven |
-| `riya@maven.example` | `Passw0rd!` | user, Maven |
+The platform admin's email and password come from `.env` (`PLATFORM_ADMIN_EMAIL` /
+`PLATFORM_ADMIN_PASSWORD`); change them there before the first start.
 
 ### Walk the six steps (≈ 10 minutes)
 
@@ -208,7 +208,7 @@ the health sweep), a cloud KMS (env master key + version column), code generatio
 │   └── src/                     api.js · App.jsx · Shell.jsx · ui.jsx · pages/ (SignIn, Registry, Connections,
 │                                Build, MyAgents, AgentDetail + Playground/ApiTab/Settings, AdminReview, Marketplace)
 ├── docker/db/init.sql           creates the non-superuser app role forge_app
-├── docs/                        ARCHITECTURE (+ UML) · DESIGN (HLD/LLD) · BACKEND (code walkthrough) · VERIFY · architecture.drawio · report .docx · img/
+├── docs/                        DESIGN-DOCUMENT (the 2-page submission) · ARCHITECTURE (+ UML) · DESIGN (HLD/LLD) · BACKEND · VERIFY · architecture.drawio · report .docx · img/
 ├── docker-compose.yml           db · api · frontend · pgadmin
 ├── Dockerfile                   the api image (Python 3.11, uv, Node for the stdio MCP servers)
 ├── pyproject.toml · uv.lock     Python dependencies
@@ -216,6 +216,34 @@ the health sweep), a cloud KMS (env master key + version column), code generatio
 ```
 
 ---
+
+## Deploying to the cloud
+
+The compose file is the laptop shape; the same images run in the cloud without touching the
+isolation design (it is Postgres roles and row-level security, not infrastructure). The plan:
+
+| Piece | Today | In the cloud |
+|---|---|---|
+| `api` | `Dockerfile`, `uvicorn --reload` | the same image on a container service (Azure Container Apps / AWS ECS / Fly.io), `--reload` off, 2+ replicas |
+| `db` | `postgres:16` container | managed PostgreSQL 16; run `docker/db/init.sql` once to create the non-superuser `forge_app` role; `DATABASE_URL` points at it |
+| `frontend` | Vite dev server | `npm run build` → static files behind the provider's HTTPS ingress, `/auth` and `/v1` proxied to `api` |
+| secrets | `.env` | the provider's secret store for `GOOGLE_API_KEY`, `JWT_SECRET`, `FORGE_MASTER_KEY`, `PLATFORM_ADMIN_*` |
+| stdio MCP servers | subprocesses inside `api` | their own container, or the vendors' HTTP endpoints |
+| pgAdmin | container | not deployed |
+
+Cookies become `Secure`, the health sweep stays a single task per replica, and LangGraph
+checkpoints already live in Postgres, so a replica restart loses nothing.
+
+---
+
+## What is submitted
+
+| Deliverable | Where |
+|---|---|
+| The platform — `docker compose up` and it runs; how to start it and log in | this repository, this README |
+| The design document — how each rule was made true, what we would do with another month | [`docs/DESIGN-DOCUMENT.md`](docs/DESIGN-DOCUMENT.md) |
+| The multi-agent demo agent, built through the platform | *GitHub Issue Daily Summary*: coordinator → `collector` (GitHub) → `poster` (Slack, asks first); built from the brief's sentence in Build, published, approved, installed by a second company |
+| The demo recording — the six steps without cuts | recorded from the walk-through above |
 
 ## Status
 
