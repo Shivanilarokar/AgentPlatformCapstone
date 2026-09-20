@@ -38,16 +38,6 @@ from app.runtime.models import chat_model, chat_model_with_tools
 log = logging.getLogger(__name__)
 
 MAX_TOOL_ROUNDS = 6  # per specialist, so a confused model cannot loop forever
-CONTEXT_CHARS = 4000  # how much of each earlier finding a later worker gets to see
-
-#: Appended to every worker's instructions. The same rule for every server: what
-#: a worker hands on or posts is written for a person, in full, as plain text.
-OUTPUT_RULES = (
-    "Rules for what you produce: cover EVERY item you were given - count them and state the total; "
-    "group by theme when there are many; be concise but complete. Write plain text with real line "
-    "breaks, no markdown headings and no escaped characters like backslash-n - it may be posted to a "
-    "chat tool as-is. Never invent items that were not in the data."
-)
 
 
 class RunState(TypedDict):
@@ -134,7 +124,7 @@ async def compile_agent(
             # no-op when nobody streams. Never carries tool arguments.
             tell = get_stream_writer()
             messages: list[Any] = [
-                SystemMessage(f"You are '{name}'. {instructions}\n\n{OUTPUT_RULES}"),
+                SystemMessage(f"You are '{name}'. {instructions}"),
                 HumanMessage(
                     f"Task: {state['task']}\n\n"
                     f"What earlier steps found:\n{_context(state) or '(nothing yet)'}"
@@ -162,7 +152,7 @@ async def compile_agent(
                         tell({"kind": "tool_call", "worker": name, "tool": ref,
                               "risk": str(by_ref[ref].risk), "asks": by_ref[ref].approval is Approval.ASK})
                         # -- this is where the graph may stop and wait for a human
-                        output = await runners[ref](**_clean_args(call["args"]))
+                        output = await runners[ref](**call["args"])
                         results[ref] = output
                         tell({"kind": "tool_result", "worker": name, "tool": ref,
                               "ok": not output.startswith("ERROR"), "summary": _clip(output, 140)})
@@ -235,20 +225,7 @@ def _text(message: Any) -> str:
 
 
 def _context(state: RunState) -> str:
-    return "\n".join(f"{k}: {_clip(v, CONTEXT_CHARS)}" for k, v in state["results"].items())
-
-
-def _clean_args(args: Any) -> Any:
-    """Models sometimes write a newline as the two characters backslash-n inside a
-    string argument. A chat tool then posts them literally. Turn them back into
-    real line breaks - only when the string has none of its own."""
-    if isinstance(args, dict):
-        return {k: _clean_args(v) for k, v in args.items()}
-    if isinstance(args, list):
-        return [_clean_args(v) for v in args]
-    if isinstance(args, str) and "\\n" in args and "\n" not in args:
-        return args.replace("\\n", "\n").replace("\\t", "\t")
-    return args
+    return "\n".join(f"{k}: {_clip(v, 400)}" for k, v in state["results"].items())
 
 
 def _clip(text: str, limit: int = 90) -> str:
