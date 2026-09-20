@@ -219,26 +219,17 @@ the health sweep), a cloud KMS (env master key + version column), code generatio
 
 ## What we would do differently with another month
 
-**1. Deploy it to the cloud.** The compose file is the laptop shape; the same images run in the cloud without touching the
-isolation design (it is Postgres roles and row-level security, not infrastructure). The plan:
-
-| Piece | Today | In the cloud |
-|---|---|---|
-| `api` | `Dockerfile`, `uvicorn --reload` | the same image on a container service (Azure Container Apps / AWS ECS / Fly.io), `--reload` off, 2+ replicas |
-| `db` | `postgres:16` container | managed PostgreSQL 16; run `docker/db/init.sql` once to create the non-superuser `forge_app` role; `DATABASE_URL` points at it |
-| `frontend` | Vite dev server | `npm run build` → static files behind the provider's HTTPS ingress, `/auth` and `/v1` proxied to `api` |
-| secrets | `.env` | the provider's secret store for `GOOGLE_API_KEY`, `JWT_SECRET`, `FORGE_MASTER_KEY`, `PLATFORM_ADMIN_*` |
-| stdio MCP servers | subprocesses inside `api` | their own container, or the vendors' HTTP endpoints |
-| pgAdmin | container | not deployed |
-
-Cookies become `Secure`, the health sweep stays a single task per replica, and LangGraph
-checkpoints already live in Postgres, so a replica restart loses nothing.
+**1. Deploy it to the cloud.** The same `api` image on a container service (Azure Container Apps /
+AWS ECS / Fly.io) with a managed PostgreSQL 16 — `docker/db/init.sql` creates the non-superuser
+`forge_app` role there too — the frontend built with `vite build` and served behind HTTPS, and the
+secrets (`GOOGLE_API_KEY`, `JWT_SECRET`, `FORGE_MASTER_KEY`) in the provider's secret store instead
+of `.env`. Nothing in the isolation design changes: it is Postgres roles and row-level security, not
+infrastructure, and LangGraph checkpoints already live in Postgres, so a replica restart loses nothing.
 
 **2. Migrations** — Alembic with two trees (platform, tenant template) instead of `docker compose down -v`.
-**3. Joining a company by invite link** instead of by name. **4. OAuth connections** for GitHub, Slack
-and Atlassian instead of pasted tokens. **5. Schedules and agent versioning** — `schedule` is already in
-the document; nothing runs it yet. **6. A larger model** behind the same `ModelSpec`.
-The full list, with what we would *not* change, is in [`docs/DESIGN-DOCUMENT.md`](docs/DESIGN-DOCUMENT.md).
+**3. Joining a company by invite link** instead of by name. **4. A larger model** behind the same
+`ModelSpec`. The full list, with what we would *not* change, is in
+[`docs/DESIGN-DOCUMENT.md`](docs/DESIGN-DOCUMENT.md).
 
 ---
 
