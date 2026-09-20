@@ -17,11 +17,11 @@ purpose:
 from __future__ import annotations
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.builder.schema import AgentConfig
 from app.runtime import compiler
-from app.runtime.compiler import MAX_TOOL_ROUNDS, NO_GUESSING, compile_agent
+from app.runtime.compiler import MAX_TOOL_ROUNDS, NO_GUESSING, _placeholder, compile_agent
 from app.runtime.guarded_tool import RunContext
 
 CONFIG = AgentConfig.model_validate({
@@ -117,3 +117,50 @@ async def test_an_agent_that_answers_straight_away_is_untouched(monkeypatch):
     assert len(model.calls) == 1                              # no extra wrap-up call
     summaries = [v for k, v in result["results"].items() if k.endswith(".summary")]
     assert summaries == ["Which repository do you mean?"]
+
+
+# ------------------------------------------- placeholders never reach a tool
+
+
+@pytest.mark.parametrize("args, is_placeholder", [
+    ({"owner": "my-org", "repo": "my-repo"}, True),
+    ({"repo": "owner/repo"}, True),
+    ({"repo": "<repo>"}, True),
+    ({"owner": "{owner}"}, True),
+    ({"q": {"repo": "your-repo"}}, True),          # nested values are checked too
+    ({"owner": "example-org"}, True),
+    ({"repo": "guess"}, False),
+    ({"owner": "microsoft", "repo": "vscode"}, False),
+    ({"text": "Hi <@U123>, see <https://x.io|link> - my name is Sam"}, False),   # Slack syntax is not a placeholder
+    ({"query": "is:open label:bug", "per_page": 5, "flag": True}, False),
+])
+def test_placeholder_values_are_recognised(args, is_placeholder):
+    assert (_placeholder(args) is not None) is is_placeholder
+
+
+def test_the_instruction_names_the_format_to_ask_for():
+    assert "Please provide the repository name in owner/repo format." in NO_GUESSING
+    assert "my-org/my-repo" in NO_GUESSING            # named as something NOT to use
+
+
+async def test_a_placeholder_call_is_stopped_and_the_model_gets_to_ask(monkeypatch):
+    ask = "Please provide the repository name in owner/repo format."
+
+    class Invents(Stub):
+        async def ainvoke(self, messages, **_):
+            self.calls.append(list(messages))
+            if isinstance(messages[-1], ToolMessage):        # it was told no: now it asks
+                return AIMessage(ask)
+            return AIMessage("", tool_calls=[{"name": "github__list_issues", "id": "c1",
+                                              "args": {"owner": "my-org", "repo": "my-repo"}}])
+
+    model = Invents(on_wrap_up=None)
+    result = await run(monkeypatch, model)
+
+    assert "github.list_issues" not in result["results"]          # the tool never ran
+    assert "could not be found" not in " ".join(result["transcript"])
+    (summary,) = [v for k, v in result["results"].items() if k.endswith(".summary")]
+    assert summary == ask
+    assert len(model.calls) == 2                                  # one refused try, then the question
+    refusal = model.calls[1][-1]
+    assert isinstance(refusal, ToolMessage) and "placeholder" in refusal.content
