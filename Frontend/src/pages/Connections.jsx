@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { ago, del, get, post } from "../api";
 import { Badge, Card, Check, Field, Loading, SectionTitle, TopBar } from "../ui";
@@ -114,6 +114,10 @@ export default function Connections() {
   // opens the form already pointed at that server.
   const [params, setParams] = useSearchParams();
   const requested = params.get("add");
+  // Arriving from a paused build: /connections?add=slack&back=/build?thread=...
+  // After the credential is saved, go straight back to that build.
+  const back = params.get("back");
+  const navigate = useNavigate();
   const [adding, setAdding] = useState(Boolean(requested));
 
   const load = useCallback(async () => {
@@ -159,7 +163,8 @@ export default function Connections() {
         {adding && (
           <AddForm catalogue={catalogue} connections={connections}
                    initialName={requested ?? undefined}
-                   onAdded={load} onCancel={closeForm} />
+                   onAdded={async () => { await load(); if (back && back.startsWith("/")) navigate(back); }}
+                   onCancel={closeForm} />
         )}
 
         <Card style={{ padding: 0, marginBottom: 22 }}>

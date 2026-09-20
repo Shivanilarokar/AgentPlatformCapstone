@@ -44,6 +44,7 @@ class ResumeIn(BaseModel):
 class BuildOut(BaseModel):
     thread_id: str
     status: str  # waiting | done | nothing_to_do
+    prompt: str = ""  # what the person typed, so a reloaded build shows it
     interrupt: dict | None = None
     log: list[str] = []
     agent_id: str | None = None
@@ -64,10 +65,12 @@ def _thread(claims: Claims, public_id: str) -> str:
 
 def _shape(thread_id: str, result: dict[str, Any]) -> BuildOut:
     pending = result.get("__interrupt__")
+    prompt = result.get("prompt", "")
     if pending:
         return BuildOut(
             thread_id=thread_id,
             status="waiting",
+            prompt=prompt,
             interrupt=pending[0].value,
             log=result.get("log", []),
         )
@@ -75,11 +78,12 @@ def _shape(thread_id: str, result: dict[str, Any]) -> BuildOut:
         return BuildOut(
             thread_id=thread_id,
             status="done",
+            prompt=prompt,
             log=result.get("log", []),
             agent_id=result["agent_id"],
             config=result.get("config"),
         )
-    return BuildOut(thread_id=thread_id, status="nothing_to_do", log=result.get("log", []))
+    return BuildOut(thread_id=thread_id, status="nothing_to_do", prompt=prompt, log=result.get("log", []))
 
 
 @router.post("", response_model=BuildOut, status_code=202)
@@ -180,12 +184,14 @@ async def get_build(thread_id: str, claims: Claims = Depends(current_user)):
         return BuildOut(
             thread_id=thread_id,
             status="waiting",
+            prompt=snapshot.values.get("prompt", ""),
             interrupt=pending[0].value,
             log=snapshot.values.get("log", []),
         )
     return BuildOut(
         thread_id=thread_id,
         status="done" if snapshot.values.get("agent_id") else "nothing_to_do",
+        prompt=snapshot.values.get("prompt", ""),
         log=snapshot.values.get("log", []),
         agent_id=snapshot.values.get("agent_id"),
         config=snapshot.values.get("config"),

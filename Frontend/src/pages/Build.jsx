@@ -153,7 +153,7 @@ function SelectTools({ payload, onAnswer, busy }) {
 
 /* ---------------------------------------------------------- interrupt 2 */
 
-function MissingConnection({ payload, onAnswer, busy }) {
+function MissingConnection({ payload, onAnswer, busy, thread }) {
   return (
     <div className="interrupt">
       <div className="ihead">
@@ -183,8 +183,9 @@ function MissingConnection({ payload, onAnswer, busy }) {
         </p>
 
         <div className="row">
-          <Link className="btn primary sm" to={`/connections?add=${payload.missing[0]}`}>
-            Connect {payload.missing[0]}
+          <Link className="btn primary sm" target="_blank" rel="noreferrer"
+                to={`/connections?add=${payload.missing[0]}&back=${encodeURIComponent(`/build?thread=${thread}`)}`}>
+            Connect {payload.missing[0]} ↗
           </Link>
           <button className="btn sm" disabled={busy}
                   onClick={() => onAnswer({ action: "connected" })}>
@@ -215,9 +216,23 @@ export default function Build() {
   // Reload a build that is still paused - this is what makes "come back
   // tomorrow" work. The browser only ever held a thread id.
   useEffect(() => {
-    if (!thread) return;
-    get(`/v1/builds/${thread}`).then(setState).catch(() => setError("That build is gone."));
-  }, [thread]);
+    if (!thread) {
+      // Came back through the nav (e.g. after connecting Slack in another tab)?
+      // Reopen the build that is still waiting for an answer.
+      let last = null;
+      try { last = localStorage.getItem("forge.build"); } catch { /* private mode */ }
+      if (last) setParams({ thread: last }, { replace: true });
+      return;
+    }
+    get(`/v1/builds/${thread}`).then((b) => {
+      setState(b);
+      if (b.prompt) setPrompt(b.prompt);
+      try {
+        if (b.status === "waiting") localStorage.setItem("forge.build", thread);
+        else localStorage.removeItem("forge.build");
+      } catch { /* ignore */ }
+    }).catch(() => { setError("That build is gone."); try { localStorage.removeItem("forge.build"); } catch { /* ignore */ } });
+  }, [thread, setParams]);
 
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [state]);
 
@@ -226,6 +241,7 @@ export default function Build() {
     try {
       const r = await post("/v1/builds", { prompt });
       setState(r);
+      try { localStorage.setItem("forge.build", r.thread_id); } catch { /* ignore */ }
       setParams({ thread: r.thread_id }, { replace: true });
     } catch (e) { setError(e.message); }
     setBusy(false);
@@ -234,7 +250,9 @@ export default function Build() {
   async function answer(body) {
     setBusy(true); setError(null);
     try {
-      setState(await post(`/v1/builds/${state.thread_id}/resume`, body));
+      const r = await post(`/v1/builds/${state.thread_id}/resume`, body);
+      setState(r);
+      try { if (r.status !== "waiting") localStorage.removeItem("forge.build"); } catch { /* ignore */ }
     } catch (e) { setError(e.message); }
     setBusy(false);
   }
@@ -279,7 +297,7 @@ export default function Build() {
 
               {state && (
                 <>
-                  <div className="msg user"><div className="body">{prompt || "(earlier request)"}</div></div>
+                  <div className="msg user"><div className="body">{prompt || state.prompt || "(earlier request)"}</div></div>
                   {state.log?.map((line, i) => (
                     <div className="msg bot" key={i}>
                       <div className="who-av">F</div>
@@ -302,7 +320,7 @@ export default function Build() {
                 <div className="msg bot">
                   <div className="who-av">F</div>
                   <div className="body" style={{ width: "100%" }}>
-                    <MissingConnection payload={state.interrupt} onAnswer={answer} busy={busy} />
+                    <MissingConnection payload={state.interrupt} onAnswer={answer} busy={busy} thread={state.thread_id} />
                   </div>
                 </div>
               )}
@@ -369,7 +387,7 @@ export default function Build() {
                   thread <span className="mono">{state.thread_id}</span> — bookmark this URL, the
                   build survives a restart
                 </span>
-                <button className="btn sm" onClick={() => { setState(null); setPrompt(""); setParams({}); }}>
+                <button className="btn sm" onClick={() => { setState(null); setPrompt(""); setParams({}); try { localStorage.removeItem("forge.build"); } catch { /* ignore */ } }}>
                   Start over
                 </button>
               </div>
