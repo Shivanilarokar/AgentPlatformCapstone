@@ -101,6 +101,7 @@
 }
 .step.done .n { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
 .step.now  .n { background: var(--ink); color: #fdfdfc; border-color: transparent; }
+.step.stop .n { background: transparent; color: var(--danger); border-color: var(--danger); }
 .step .lb { font-weight: 550; }
 .step .sd { color: var(--faint); font-size: 11.5px; }
 .step.todo .lb { color: var(--faint); font-weight: 500; }

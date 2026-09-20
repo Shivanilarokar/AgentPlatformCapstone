@@ -164,7 +164,11 @@ async def understand(state: BuildState) -> dict:
     """
     async with tenant_session(state["tenant"], state["user"]) as s:
         views = await registry.list_servers(s)  # this company's + shared: enabled tools only
-        any_switched_off = bool(await registry.disabled_refs(s))
+        switched_off = [
+            str(t.risk)
+            for v in await registry.list_servers(s, include_disabled=True)
+            for t in v.tools if not t.enabled
+        ]
 
     catalogue = [
         {
@@ -206,7 +210,7 @@ async def understand(state: BuildState) -> dict:
             "catalogue": catalogue,
             "name": draft.name,
             "gaps": gaps,
-            "log": [_cannot_build(gaps, views, any_switched_off)],
+            "log": [_cannot_build(gaps, views, _switched_off_could_help(gaps, switched_off))],
         }
 
     valid = {c["ref"] for c in catalogue}
@@ -295,6 +299,15 @@ def _explained_by(action: str, unmet: list[dict]) -> bool:
     pause; only an action that a server the person HAS cannot do ends the build."""
     a = action.lower()
     return any(u["need"].replace("_", " ") in a or a in u["why"].lower() or u["why"].lower() in a for u in unmet)
+
+
+def _switched_off_could_help(gaps: list[str], switched_off_risks: list[str]) -> bool:
+    """Would asking the admin to switch a tool on plausibly fix this? Only if a
+    switched-off tool is at least as powerful as the action: nothing switched
+    off can "delete" when every tool that is off is a write tool."""
+    return any(
+        _POWER[Risk(r)] >= _POWER[classify_risk(g)] for g in gaps for r in set(switched_off_risks)
+    )
 
 
 def _cannot_build(gaps: list[str], views: list, any_switched_off: bool) -> str:

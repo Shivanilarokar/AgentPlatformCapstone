@@ -21,17 +21,17 @@ const STEPS = [
   ["done", "Build and deploy", "Write the config, create the agent"],
 ];
 
-function Steps({ at }) {
+function Steps({ at, stopped }) {
   const order = STEPS.map(([k]) => k);
   const now = order.indexOf(at);
   return (
     <div className="steps">
       <div className="section-title" style={{ marginTop: 0 }}>Builder graph</div>
       {STEPS.map(([key, label, sub], i) => {
-        const state = i < now ? "done" : i === now ? "now" : "todo";
+        const state = i < now ? "done" : i === now ? (stopped ? "stop" : "now") : "todo";
         return (
           <div className={`step ${state}`} key={key}>
-            <div className="n">{state === "done" ? "✓" : i + 1}</div>
+            <div className="n">{state === "done" ? "✓" : state === "stop" ? "✕" : i + 1}</div>
             <div>
               <div className="lb">{label}</div>
               <div className="sd">{sub}</div>
@@ -247,7 +247,10 @@ export default function Build() {
   }, [state?.status, state?.agent_id]);
 
   const kind = state?.interrupt?.type;
-  const at = !state ? "understand"
+  // A refused build (nothing to do) stopped at the first step: it never got to
+  // picking tools or checking connections, so those must not show as done.
+  const refused = state?.status === "nothing_to_do";
+  const at = !state || refused ? "understand"
     : kind === "select_tools" ? "select"
     : kind === "missing_connection" ? "connections"
     : "done";
@@ -376,7 +379,7 @@ export default function Build() {
             )}
           </div>
 
-          <Steps at={at} />
+          <Steps at={at} stopped={refused} />
         </div>
       </div>
     </>
