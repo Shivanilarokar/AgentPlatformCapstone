@@ -1,0 +1,46 @@
+# Keeps the browser on ONE origin in production, the same trick vite.config.js
+# uses in dev: proxy /auth, /v1, /health through to the api so the forge_token
+# cookie (SameSite=Lax) is sent on every request without any CORS setup.
+server {
+    listen 8080;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Cloud Run's edge proxy adds enough tracing/forwarding headers, on both the
+    # incoming request and the upstream response, to blow past nginx's small
+    # defaults - surfaces as a silent 502 (upstream) or 400 (client) otherwise.
+    large_client_header_buffers 4 16k;
+    proxy_buffer_size 16k;
+    proxy_buffers 4 16k;
+    proxy_busy_buffers_size 16k;
+
+    # No "Host" override here, deliberately: Cloud Run routes each service by
+    # the Host header, so it must stay $proxy_host (the api's own hostname,
+    # nginx's default) rather than the frontend's own incoming Host - sending
+    # the wrong one misroutes the request at Google's edge before it ever
+    # reaches the api container.
+    location /auth/ {
+        proxy_pass ${API_URL};
+        proxy_ssl_server_name on;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /v1/ {
+        proxy_pass ${API_URL};
+        proxy_ssl_server_name on;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location = /health {
+        proxy_pass ${API_URL};
+        proxy_ssl_server_name on;
+    }
+
+    location / {
+        try_files $uri /index.html;
+    }
+}

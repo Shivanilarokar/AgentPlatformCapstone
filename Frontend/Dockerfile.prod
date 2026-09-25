@@ -1,0 +1,15 @@
+FROM node:22-alpine AS build
+WORKDIR /srv
+COPY package.json package-lock.json* ./
+RUN npm install
+COPY . .
+RUN npm run build
+
+FROM nginx:1.27-alpine
+COPY --from=build /srv/dist /usr/share/nginx/html
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+# API_URL is substituted into the template at container start by the base
+# image's entrypoint (envsubst), so one image works for any environment -
+# only the Cloud Run env var changes, no rebuild needed.
+ENV API_URL=http://localhost:8000
+EXPOSE 8080
