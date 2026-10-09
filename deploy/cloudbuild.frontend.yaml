@@ -1,0 +1,27 @@
+# Builds the frontend image (React build served by nginx) and pushes it.
+#
+#   gcloud builds submit --config deploy/cloudbuild.frontend.yaml Frontend
+#
+# Run with `Frontend` as the build context: Dockerfile.prod and
+# nginx.conf.template both live there, next to package.json.
+substitutions:
+  _REGION: asia-south1
+  _REPO: forge-images
+  _IMAGE: frontend
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - Dockerfile.prod
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:latest
+      - .
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_IMAGE}:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+timeout: 1200s

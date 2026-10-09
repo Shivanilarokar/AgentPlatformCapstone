@@ -164,6 +164,88 @@ docker compose down -v && docker compose up -d --build   # all data gone; sign u
 
 ---
 
+## Running it on Google Cloud
+
+The same product also runs on Cloud Run with Cloud SQL. **Nothing about the design changes** —
+multi-tenancy is a Postgres schema and role per company plus row-level security per person, so it
+moves across untouched. Only two lines of application code differ, both about the auth cookie being
+`Secure` over HTTPS.
+
+```
+Browser ──HTTPS──► Cloud Run: forge-frontend (nginx :8080)
+                     serves the React build
+                     proxies /auth /v1 /health ──HTTPS──► Cloud Run: forge-backend (FastAPI :8080)
+                                                            gen2 · min-instances=1 · CPU always on
+                                                            │ Unix socket /cloudsql/<instance>
+                                                            ▼
+                                                   Cloud SQL: forge-db (PostgreSQL 16)
+```
+
+The nginx proxy keeps the browser on one origin, so the httpOnly cookie works with no CORS — the
+same thing `vite.config.js` does in development.
+
+### One-time setup
+
+```bash
+gcloud auth login
+gcloud config set project <PROJECT_ID>
+gcloud services enable run.googleapis.com sqladmin.googleapis.com \
+    artifactregistry.googleapis.com cloudbuild.googleapis.com secretmanager.googleapis.com
+
+gcloud artifacts repositories create forge-images --repository-format=docker --location=asia-south1
+
+gcloud sql instances create forge-db --database-version=POSTGRES_16 --edition=ENTERPRISE \
+    --tier=db-g1-small --region=asia-south1 --storage-size=10GB --no-backup \
+    --database-flags=max_connections=100 --root-password='<ROOT_PASSWORD>'
+gcloud sql databases create forge --instance=forge-db
+
+# the docker/db/init.sql equivalent - creates the non-superuser app role
+psql "host=<INSTANCE_IP> dbname=forge user=postgres sslmode=require" -f deploy/bootstrap.sql
+
+# five secrets, read at container start (never baked into an image)
+printf '%s' "postgresql+psycopg://forge_app:<APP_PASSWORD>@/forge?host=/cloudsql/<PROJECT>:asia-south1:forge-db" \
+  | gcloud secrets create forge-database-url --data-file=-
+printf '%s' "<GEMINI_KEY>"   | gcloud secrets create forge-google-api-key --data-file=-
+printf '%s' "<JWT_SECRET>"   | gcloud secrets create forge-jwt-secret --data-file=-
+printf '%s' "<MASTER_KEY>"   | gcloud secrets create forge-master-key --data-file=-
+printf '%s' "<ADMIN_PASSWORD>" | gcloud secrets create forge-platform-admin-password --data-file=-
+```
+
+The build and runtime service accounts need five roles: `storage.admin`,
+`artifactregistry.writer`, `logging.logWriter`, `secretmanager.secretAccessor`, `cloudsql.client`.
+
+> **`FORGE_MASTER_KEY` is set once and never changed.** Every stored credential is encrypted under
+> it; rotate it and every connection becomes undecryptable.
+
+### Deploy
+
+```bash
+bash deploy/deploy.sh backend     # build + deploy the FastAPI service
+bash deploy/deploy.sh frontend    # build + deploy nginx + the React build
+bash deploy/deploy.sh all
+```
+
+Both are idempotent — run again after any change.
+
+### Why the Cloud Run flags are what they are
+
+| Flag | Reason |
+|---|---|
+| `--execution-environment=gen2` | gives the container a writable filesystem, so the `filesystem` / `git` / `sqlite` stdio servers work inside `/srv/workspace` exactly as they do locally |
+| `--min-instances=1 --no-cpu-throttling` | the 5-minute health sweep is an in-process asyncio task and the Playground streams SSE; a scaled-to-zero, CPU-throttled instance kills both |
+| `--max-instances=2` | each instance keeps its own per-company database pools |
+| `--timeout=3600` | a run can wait on a human approval |
+| `--add-cloudsql-instances=…` | mounts the Unix socket the `DATABASE_URL` points at |
+
+### Teardown
+
+```bash
+gcloud run services delete forge-backend forge-frontend --region=asia-south1
+gcloud sql instances delete forge-db
+```
+
+---
+
 ## Tech stack — and why this one
 
 | Layer | Choice | Why |
@@ -207,6 +289,8 @@ the health sweep), a cloud KMS (env master key + version column), code generatio
 ├── Frontend/
 │   └── src/                     api.js · App.jsx · Shell.jsx · ui.jsx · pages/ (SignIn, Registry, Connections,
 │                                Build, MyAgents, AgentDetail + Playground/ApiTab/Settings, AdminReview, Marketplace)
+├── deploy/                      Cloud Run + Cloud SQL: deploy.sh · bootstrap.sql · cloudbuild configs · start.sh
+├── Dockerfile.cloudrun          the backend image for Cloud Run (no --reload, $PORT)
 ├── docker/db/init.sql           creates the non-superuser app role forge_app
 ├── docs/                        DESIGN-DOCUMENT (the 2-page submission) · ARCHITECTURE (+ UML) · DESIGN (HLD/LLD) · BACKEND · VERIFY · architecture.drawio · report .docx · img/
 ├── docker-compose.yml           db · api · frontend · pgadmin
@@ -219,16 +303,9 @@ the health sweep), a cloud KMS (env master key + version column), code generatio
 
 ## What we would do differently with another month
 
-**1. Deploy it to the cloud.** The same `api` image on a container service (Azure Container Apps /
-AWS ECS / Fly.io) with a managed PostgreSQL 16 — `docker/db/init.sql` creates the non-superuser
-`forge_app` role there too — the frontend built with `vite build` and served behind HTTPS, and the
-secrets (`GOOGLE_API_KEY`, `JWT_SECRET`, `FORGE_MASTER_KEY`) in the provider's secret store instead
-of `.env`. Nothing in the isolation design changes: it is Postgres roles and row-level security, not
-infrastructure, and LangGraph checkpoints already live in Postgres, so a replica restart loses nothing.
-
-**2. Migrations** — Alembic with two trees (platform, tenant template) instead of `docker compose down -v`.
-**3. Joining a company by invite link** instead of by name. **4. A larger model** behind the same
-`ModelSpec`. The full list, with what we would *not* change, is in
+**1. Migrations** — Alembic with two trees (platform, tenant template) instead of `docker compose down -v`.
+**2. Joining a company by invite link** instead of by name. **3. A larger model** behind the same
+`ModelSpec`. **4. Alerting and budgets** on the Cloud Run services. The full list, with what we would *not* change, is in
 [`docs/DESIGN-DOCUMENT.md`](docs/DESIGN-DOCUMENT.md).
 
 ---

@@ -1,0 +1,23 @@
+# The frontend image for Cloud Run: build the React app, serve it with nginx.
+#
+# The local Frontend/Dockerfile runs the Vite DEV server - right for hot reload,
+# wrong for production. Here the bundle is built once and nginx serves the
+# static files, with the same /auth, /v1, /health proxy that vite.config.js
+# provides in development, so the browser stays on one origin and the
+# forge_token cookie keeps working with no CORS.
+FROM node:22-alpine AS build
+WORKDIR /srv
+COPY package.json package-lock.json* ./
+RUN npm install
+COPY . .
+RUN npm run build
+
+FROM nginx:1.27-alpine
+COPY --from=build /srv/dist /usr/share/nginx/html
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+
+# BACKEND_URL is substituted into the template at container start by the nginx
+# image's own entrypoint (envsubst), so one image works in any environment -
+# only the Cloud Run env var changes, never a rebuild.
+ENV BACKEND_URL=http://localhost:8000
+EXPOSE 8080

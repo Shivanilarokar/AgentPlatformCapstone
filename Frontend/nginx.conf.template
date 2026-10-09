@@ -1,0 +1,66 @@
+# Keeps the browser on ONE origin in production - the same trick
+# vite.config.js uses in development. /auth, /v1 and /health are forwarded to
+# the backend service, so the forge_token cookie (httpOnly, SameSite=Lax) is
+# sent on every request with no CORS setup anywhere.
+#
+# BACKEND_URL is substituted at container start (see Dockerfile.prod).
+server {
+    listen 8080;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Cloud Run's edge adds enough tracing and forwarding headers, on both the
+    # request and the upstream response, to blow past nginx's small defaults -
+    # which surfaces as a silent 502 (upstream) or 400 (client).
+    large_client_header_buffers 4 16k;
+    proxy_buffer_size 16k;
+    proxy_buffers 4 16k;
+    proxy_busy_buffers_size 16k;
+
+    # Deliberately NO "proxy_set_header Host" below: Cloud Run routes each
+    # service by the Host header, so it must stay $proxy_host (the backend's own
+    # hostname, nginx's default). Sending the frontend's Host misroutes the
+    # request at Google's edge before it ever reaches the backend container.
+
+    # --- the API ---------------------------------------------------------
+    # Streaming matters here: POST /v1/agents/{id}/stream is Server-Sent
+    # Events. Without proxy_buffering off the Playground shows nothing until a
+    # run finishes, and without the long read timeout an agent that waits on a
+    # human approval is cut off after 60 seconds.
+    location /v1/ {
+        proxy_pass ${BACKEND_URL};
+        proxy_ssl_server_name on;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_cache off;
+        chunked_transfer_encoding on;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    location /auth/ {
+        proxy_pass ${BACKEND_URL};
+        proxy_ssl_server_name on;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location = /health {
+        proxy_pass ${BACKEND_URL};
+        proxy_ssl_server_name on;
+    }
+
+    # --- the single-page app ---------------------------------------------
+    # Every other path is a client-side route (/build, /agents/<id>, ...), so
+    # serve index.html and let React Router decide.
+    location / {
+        try_files $uri /index.html;
+    }
+}

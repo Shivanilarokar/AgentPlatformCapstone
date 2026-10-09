@@ -1,0 +1,62 @@
+# The backend image for Cloud Run.
+#
+# Deliberately almost identical to the local `Dockerfile` - same base, same
+# dependencies, same /srv/workspace prepared at BUILD time, so the three stdio
+# MCP servers behave exactly as they do under docker compose. Two differences,
+# both forced by Cloud Run:
+#
+#   1. no --reload      the file watcher is a development tool; it crashes on
+#                       Cloud Run and is pointless on an immutable image
+#   2. listens on $PORT Cloud Run injects the port and health-checks it
+#
+# Deployed with --execution-environment=gen2, which gives the container a
+# writable (in-memory) filesystem. That is what lets the filesystem and git
+# servers work inside /srv/workspace without any change to the application.
+#
+# Build:  gcloud builds submit --config deploy/cloudbuild.backend.yaml .
+FROM python:3.11-slim
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv  /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uvx /usr/local/bin/uvx
+
+# The platform launches the reference MCP servers as subprocesses:
+#   uvx  -> the Python ones (mcp-server-git, mcp-server-sqlite)
+#   npx  -> the Node one    (@modelcontextprotocol/server-filesystem)
+# git itself is a runtime dependency of mcp-server-git.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends nodejs npm git ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /srv
+
+# uvicorn is a console script, so sys.path[0] is /usr/local/bin, not /srv.
+ENV PYTHONPATH=/srv
+
+COPY pyproject.toml ./
+RUN uv pip install --system --no-cache -r pyproject.toml
+
+COPY backend/app ./app
+COPY deploy/start.sh /usr/local/bin/start.sh
+RUN chmod +x /usr/local/bin/start.sh
+
+# /srv/workspace is the only directory the filesystem server may touch.
+# /srv/var holds the sqlite server's database file.
+# mcp-server-git needs an actual repository, so make one the agents can use.
+# Identical to the local Dockerfile - the registry's default paths, unchanged.
+RUN mkdir -p /srv/workspace /srv/var \
+ && git config --global user.email "agent@forge.local" \
+ && git config --global user.name "Forge Agent" \
+ && git config --global init.defaultBranch main \
+ && git config --global --add safe.directory /srv/workspace \
+ && git init -q /srv/workspace \
+ && echo "Scratch space for agents." > /srv/workspace/README.md \
+ && git -C /srv/workspace add -A \
+ && git -C /srv/workspace commit -qm "initial commit"
+
+# npx and uvx download their package on first use; give them a writable cache.
+ENV npm_config_cache=/tmp/.npm \
+    UV_CACHE_DIR=/tmp/.uv \
+    PORT=8080
+
+EXPOSE 8080
+CMD ["/usr/local/bin/start.sh"]

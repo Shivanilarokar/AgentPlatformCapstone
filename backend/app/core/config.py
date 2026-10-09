@@ -1,3 +1,4 @@
+
 """Every value the app reads from the environment, in one typed place.
 
 Database, model providers, the JWT secret, the vault master key, the platform
@@ -28,6 +29,11 @@ class Settings(BaseSettings):
     # through sign-up. Belongs to no company. Override both in .env.
     platform_admin_email: str = "admin@forge.dev"
     platform_admin_password: str = "Passw0rd!"
+
+    # --- where this instance is running ---------------------------------------
+    # True in the cloud (Cloud Run is HTTPS end to end), False for local docker
+    # compose. Only the auth cookie's Secure flag depends on it.
+    https_only: bool = False
 
     # --- the vault -----------------------------------------------------------
     # 32 bytes, base64url. The dev default exists so a fresh clone runs; set a

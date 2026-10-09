@@ -21,6 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_user, platform_db
+from app.core.config import settings
 from app.core.security import Claims, hash_password, issue_token, verify_password
 from app.models.platform_ import Tenant, User
 from app.tenancy.provision import create_tenant
@@ -69,7 +70,10 @@ def schema_key_for(company: str) -> str:
 
 def _set_cookie(response: Response, token: str) -> None:
     # The browser UI uses a cookie; scripts and the /v1 API use Bearer. Same token.
-    response.set_cookie("forge_token", token, httponly=True, samesite="lax", max_age=7 * 86400)
+    # secure=True in the cloud (everything is HTTPS there); off for plain-http
+    # localhost, where a Secure cookie would simply never be stored.
+    response.set_cookie("forge_token", token, httponly=True, samesite="lax",
+                        secure=settings.https_only, max_age=7 * 86400)
 
 
 @router.post("/register", status_code=201)

@@ -23,3 +23,6 @@ Frontend/dist/
 
 # Word lock files (the document is open)
 ~$*
+
+# Claude Code plugin lockfile, not part of the project
+skills-lock.json
