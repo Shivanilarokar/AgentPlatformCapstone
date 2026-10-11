@@ -14,7 +14,9 @@ export function ApiTab({ agent }) {
   const [tokens, setTokens] = useState([]);
   const [fresh, setFresh] = useState(null); // {name, token} shown once
   const [busy, setBusy] = useState(false);
-  const base = `${window.location.protocol}//${window.location.hostname}:8000`;
+  // The API is served from this same origin: vite (dev) and nginx (prod) both
+  // proxy /v1 to the backend, so never point at the backend's own host/port.
+  const base = window.location.origin;
 
   const load = () => get("/v1/tokens").then(setTokens).catch(() => setTokens([]));
   useEffect(() => { load(); }, []);
@@ -23,6 +25,8 @@ export function ApiTab({ agent }) {
     setBusy(true);
     try {
       const c = await get(`/v1/agents/${agent.id}/postman`);
+      // The backend only sees the proxied host; the public URL is this one.
+      for (const v of c.variable || []) if (v.key === "base_url") v.value = base;
       const blob = new Blob([JSON.stringify(c, null, 2)], { type: "application/json" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
@@ -47,10 +51,21 @@ export function ApiTab({ agent }) {
     await load();
   }
 
-  const curl = `curl -X POST ${base}/v1/agents/${agent.id}/invoke \\
+  const [shell, setShell] = useState("powershell");
+  const url = `${base}/v1/agents/${agent.id}/invoke`;
+  const tok = fresh?.token || "<paste your forge_ token>";
+  const input = "Run the morning digest for the platform repo";
+  const curl = shell === "powershell"
+    ? `$env:FORGE_TOKEN = "${tok}"
+curl.exe -X POST "${url}" \`
+  -H "Authorization: Bearer $env:FORGE_TOKEN" \`
+  -H "Content-Type: application/json" \`
+  -d '{\\"input\\": \\"${input}\\"}'`
+    : `export FORGE_TOKEN="${tok}"
+curl -X POST "${url}" \\
   -H "Authorization: Bearer $FORGE_TOKEN" \\
   -H "Content-Type: application/json" \\
-  -d '{"input": "Run the morning digest for the platform repo"}'`;
+  -d '{"input": "${input}"}'`;
 
   return (
     <div style={{ maxWidth: 820 }}>
@@ -60,7 +75,15 @@ export function ApiTab({ agent }) {
           <code>POST /v1/agents/{agent.id}/invoke</code>
           <button className="btn primary sm" onClick={download} disabled={busy}>⤓ Download Postman collection</button>
         </div>
-        <pre style={{ fontSize: 12 }}>{curl}</pre>
+        <div className="row" style={{ gap: 6, marginBottom: 6 }}>
+          <button className={`btn sm${shell === "powershell" ? " primary" : ""}`} onClick={() => setShell("powershell")}>PowerShell</button>
+          <button className={`btn sm${shell === "bash" ? " primary" : ""}`} onClick={() => setShell("bash")}>Bash / macOS / Linux</button>
+          <button className="btn sm" onClick={() => navigator.clipboard?.writeText(curl)}>Copy</button>
+        </div>
+        <pre style={{ fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{curl}</pre>
+        <p className="faint" style={{ fontSize: 12, margin: "8px 0 0" }}>
+          {fresh ? "Your new token is filled in above." : <>Click <b>Mint a token</b> below and the command fills it in, ready to paste.</>}
+        </p>
         <p className="faint" style={{ fontSize: 12, margin: "8px 0 0" }}>
           The collection carries a token minted for you at download time. Import it, open <b>Invoke</b>,
           hit Send. If the agent reaches a write tool the response is <code>awaiting_approval</code>; answer
