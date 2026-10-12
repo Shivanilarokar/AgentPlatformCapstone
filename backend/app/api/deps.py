@@ -28,6 +28,7 @@ bearer = HTTPBearer(auto_error=False)
 NOT_FOUND = {"error": "not_found"}  # one body, used for every miss (check 9)
 
 
+# who is calling
 async def current_user(
     request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(bearer),

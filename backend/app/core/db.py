@@ -35,6 +35,8 @@ from app.tenancy.schema_names import schema_for
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+
+# engine is the database connection pool; SessionLocal is a factory for sessions that borrow from it.
 engine = create_async_engine(settings.database_url, echo=False, pool_pre_ping=True)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 

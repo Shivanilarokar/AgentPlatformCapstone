@@ -204,8 +204,12 @@ token given & not platform admin → vault.add(...)   the credential becomes MY 
 Other routes in the file: `GET /v1/servers` (`registry.list_servers` merges shared + company +
 mine, nearest wins; `connected` = I hold an active connection or `auth_type == none`),
 `GET /v1/servers/catalogue` (the six quick-picks), `POST /{name}/refresh` (`registry.refresh` with
-my token for my row, or via `platform_session` for a shared one), `PATCH /{name}` (company admin:
-`visibility`), `DELETE /{name}` (owner), `POST /health-sweep` (platform admin).
+my token for my row, or via `platform_session` for a shared one), `PATCH /{name}` (the Edit page -
+an admin, their own row only; every field optional, only what is sent changes: `transport`,
+`endpoint`, `auth_type`, `credential_env_var`, `description`, `visibility` private <-> company,
+a replacement `token` tried against the server before it is saved, and `enabled_tools` as the
+allow-list - these on, every other stored tool off, no network needed), `DELETE /{name}` (owner),
+`POST /health-sweep` (platform admin).
 
 ### 5.3 Connections — `routers/connections.py` → `vault/`
 
@@ -262,7 +266,15 @@ with `Command`; `check_connections → (missing ? ask_for_connection : assemble)
 GET /v1/agents            select(Agent) — my rows; each card: run count, last run, quality_score, safety_grade
 GET /v1/agents/{id}       _agent → AgentDetail{config, graph = cfg.graph_nodes_and_edges(), score = score_agent(...)}
 GET /v1/agents/{id}/scores  score_agent(db, agent).as_dict()   also stores quality_score / safety_grade / checks on the row
+DELETE /v1/agents/{id}    204. The owner only - RLS leaves nobody else a row, so another id is a 404
 ```
+
+`DELETE` takes the agent, its runs and its submissions (the database cascades) **and** the saved
+LangGraph state behind each of those threads - a parked run's prompt and tool arguments would
+otherwise sit in the checkpoint tables for good. A marketplace listing already published from it
+stays: that is a sanitized copy on the platform's side, other companies may have installed it, and
+taking it down is the platform admin's call. Refused `409 in_review` while a submission is still
+waiting for the admin, because the publish run is parked on that agent.
 
 `AgentConfig.graph_nodes_and_edges()` (`builder/schema.py`) derives the picture: `message →
 supervisor → each specialist → its servers`, or `message → agent → servers`. The UI draws that;

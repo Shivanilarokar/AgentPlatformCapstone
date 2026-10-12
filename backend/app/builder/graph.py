@@ -66,7 +66,6 @@ class BuildState(TypedDict, total=False):
     tenant: str
     user: str  # whose build this is: their servers, their connections, their agent
 
-    
     name: str
     description: str
     reasoning: str
