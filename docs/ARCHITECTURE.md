@@ -379,7 +379,9 @@ get a real response (check 8). Another company's token asking for this agent get
 | 8 | Postman collection gets a real response | server-generated v2.1, token pre-filled | `graded/test_check_08_postman.py` |
 | 9 | Cross-company id does not reveal existence | 0 rows → identical 404 | `graded/test_check_01_isolation.py` |
 
-`uv run pytest backend/tests` → **172 passed, 1 skipped** (the opt-in live-model test).
+`uv run pytest backend/tests` → **266 passed, 1 skipped** (the opt-in live-model test), against an
+empty database - see the README on giving the suite its own, so a workspace you are demoing in is
+not mistaken for a failure.
 
 ---
 

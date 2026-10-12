@@ -652,8 +652,10 @@ docker-compose.yml · Dockerfile · Frontend/Dockerfile
 
 ## 14. Verification
 
-- `uv run pytest backend/tests` — **172 passed, 1 skipped** (the opt-in live-model test). One file
+- `uv run pytest backend/tests` — **266 passed, 1 skipped** (the opt-in live-model test). One file
   per graded check under `backend/tests/graded/`, against a real Postgres with two throwaway companies.
+  The suite expects the database to start empty (one test sweeps every workspace), so point it at a
+  scratch database rather than one you have been demoing in — see the README.
 - `docs/VERIFY.md` — the pgAdmin queries that show every claim above, including the
   `__interrupt__` row during each pause and the psql demonstration of both locks.
 - Manual: `docker compose restart api` during pause 1, pause 2, a playground approval and a pending

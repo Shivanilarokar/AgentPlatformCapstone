@@ -146,8 +146,20 @@ container against `/srv/workspace` and `/srv/var`. No token.
 ### Tests
 
 ```bash
-uv run pytest backend/tests        # needs docker compose up (Postgres); ~2 min
-# 172 passed, 1 skipped  (the skip is the opt-in live-model test: LIVE_MODEL=1)
+uv run pytest backend/tests        # needs docker compose up (Postgres); ~6 min
+# 266 passed, 1 skipped  (the skip is the opt-in live-model test: LIVE_MODEL=1)
+```
+
+**Point them at their own database.** The suite assumes it starts empty - one test sweeps *every*
+workspace - so running it against the `forge` database you have been demoing in will fail a dozen
+tests on your own data, not on a bug. Either reset (`docker compose down -v && docker compose up`,
+which also deletes your demo companies) or, to keep them, give the tests a scratch database:
+
+```bash
+# once, as the superuser kept for pgAdmin
+psql "host=localhost user=forge password=forge dbname=postgres"   -c "CREATE DATABASE forge_test OWNER forge_app"
+
+DATABASE_URL=postgresql+psycopg://forge_app:forge_app@localhost:5432/forge_test   uv run pytest backend/tests
 ```
 
 `backend/tests/graded/` has one file per graded check — isolation (with the app filter removed),
