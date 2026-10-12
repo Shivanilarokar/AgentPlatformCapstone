@@ -11,7 +11,7 @@ compose up and it runs."*
 | Container | Image | Port | What it is | Talks to |
 |---|---|---|---|---|
 | `db` | `postgres:16` | 5432 | the only state: every schema, every checkpoint | — |
-| `api` | built from `Dockerfile` | 8000 | FastAPI + LangGraph runtime; launches MCP servers as subprocesses | `db` as role `forge_app`; GitHub/Slack/Atlassian over HTTPS |
+| `api` | built from `Dockerfile` | 8000 | FastAPI + LangGraph runtime; launches MCP servers as subprocesses | `db` as role `forge_app`; GitHub/Slack/Atlassian/Tavily over HTTPS |
 | `frontend` | built from `Frontend/Dockerfile` | 5173 | Vite dev server; proxies `/auth`, `/v1` to `api` | `api` |
 | `pgadmin` | `dpage/pgadmin4` | 5050 | a browser for the database, for humans | `db` as superuser `forge` |
 

@@ -54,7 +54,7 @@ graph TB
     API["<b>api</b> · FastAPI + Uvicorn :8000<br/>routers · tenant gate · registry client · vault<br/>builder graph · runtime compiler · scoring · publish graph<br/>+ stdio MCP servers as subprocesses (/srv/workspace)"]
     DB[("<b>db</b> · PostgreSQL 16 :5432<br/>schema platform + schema t_&lt;company&gt; × N<br/>incl. LangGraph checkpoint tables per company")]
     PGA["<b>pgadmin</b> :5050<br/>for humans"]
-    REMOTE["remote MCP servers<br/>api.githubcopilot.com/mcp · mcp.slack.com/mcp · mcp.atlassian.com/v2/mcp"]
+    REMOTE["remote MCP servers<br/>api.githubcopilot.com/mcp · mcp.slack.com/mcp<br/>mcp.atlassian.com/v2/mcp · mcp.tavily.com/mcp"]
 
     SPA -->|"/auth, /v1 proxied"| API
     API -->|"psycopg 3 as role forge_app"| DB
@@ -567,7 +567,7 @@ else → read
 | POST | `/auth/register` | — | `{email, password, name, company, intent: create\|join}`; create → schema + role + admin; join → user |
 | POST | `/auth/login` · `/auth/logout` · GET `/auth/me` | — / cookie | cookie JWT; `401 session_stale` if the company is gone |
 | GET | `/v1/servers` | any | my three-layer registry (platform admin: the Everyone layer) |
-| GET | `/v1/servers/catalogue` | any | the six vendor quick-picks |
+| GET | `/v1/servers/catalogue` | any | the seven vendor quick-picks |
 | POST | `/v1/servers/discover` | any | step one of connecting: reach the server and **list** its tools with risk; saves nothing (no server, no token); each tool carries `selectable` - `false` for a destructive tool when the caller is an ordinary user |
 | POST | `/v1/servers` | any (visibility gated) | discovers via `tools/list` first; `401 auth_required / credential_rejected`, `422 unreachable`, `409 already_exists` (never overwrites); `enabled_tools` = the admin's allow-list (omit = all on; every tool is stored either way), `422` for an unknown tool name; `403 destructive_not_allowed` if an ordinary user ticks a destructive tool (omit the pick and it is simply left off) |
 | POST | `/v1/servers/{name}/refresh` | any | re-check now |
@@ -620,7 +620,7 @@ backend/app/
     platform_.py           Tenant, User, SharedServer, SharedTool, SubmissionIndex, Listing, ApiToken
     tenant.py              Agent, Run, Submission, McpServer, McpTool, Connection   (never a schema= kwarg)
   mcp_registry/
-    catalogue.py           the six vendor quick-picks
+    catalogue.py           the seven vendor quick-picks
     mcp_client.py          Endpoint, AuthRequired, _probe, list_tools, call_tool (stdio / http / sse)
     risk.py                classify_risk
     registry.py            list_shared, list_servers, connected_servers, endpoint_for, register, refresh

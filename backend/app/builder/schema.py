@@ -53,8 +53,13 @@ class TopologyType(StrEnum):
 #: risks that must never run unattended
 GUARDED = frozenset({Risk.WRITE, Risk.DESTRUCTIVE})
 
-#: "server.tool" - the only shape a tool reference may take
-TOOL_REF = r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$"
+#: "server.tool" - the only shape a tool reference may take. The server half is
+#: ours (the registry enforces IDENT when registering), so it stays strict. The
+#: tool half is whatever the server calls its own tools, and real servers do use
+#: hyphens - Tavily's are "tavily-search" and "tavily-extract" - so a hyphen is
+#: allowed there. Still no dots, spaces or uppercase: "server.tool" has to stay
+#: splittable on the first dot.
+TOOL_REF = r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_-]*$"
 
 #: a bare identifier: a server name, or a specialist name
 IDENT = r"^[a-z][a-z0-9_]*$"

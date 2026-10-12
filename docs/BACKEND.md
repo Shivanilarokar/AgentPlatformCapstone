@@ -203,7 +203,7 @@ token given & not platform admin → vault.add(...)   the credential becomes MY 
 
 Other routes in the file: `GET /v1/servers` (`registry.list_servers` merges shared + company +
 mine, nearest wins; `connected` = I hold an active connection or `auth_type == none`),
-`GET /v1/servers/catalogue` (the six quick-picks), `POST /{name}/refresh` (`registry.refresh` with
+`GET /v1/servers/catalogue` (the seven quick-picks), `POST /{name}/refresh` (`registry.refresh` with
 my token for my row, or via `platform_session` for a shared one), `PATCH /{name}` (the Edit page -
 an admin, their own row only; every field optional, only what is sent changes: `transport`,
 `endpoint`, `auth_type`, `credential_env_var`, `description`, `visibility` private <-> company,

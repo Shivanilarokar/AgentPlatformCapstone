@@ -71,6 +71,13 @@ it. No Python is ever generated. That single decision is why:
 - **(c)** A token-shaped string cannot even enter the document (`SECRET_SHAPES` validator). The config
   is the only thing that ever travels to another company.
 
+`ref` is `server.tool`, matched by `TOOL_REF` in `builder/schema.py`. The two halves are checked
+differently on purpose. The **server** half is ours - `POST /v1/servers` only accepts
+`^[a-z][a-z0-9_]*$` as a name - so it stays strict. The **tool** half is whatever the server calls
+its own tools, and real servers do use hyphens (Tavily's are `tavily-search` and `tavily-extract`),
+so a hyphen is allowed there. No dots either side: `server.tool` has to stay splittable on the first
+dot, which `ToolSpec.server` relies on.
+
 ---
 
 ## 3. The boxes
@@ -196,7 +203,8 @@ session (`mcp_client.py`: stdio subprocess, streamable HTTP, or SSE), sends `ini
 `risk.py::classify_risk`: a destructive verb anywhere → `destructive`; a read verb as the first word
 → `read` (`list_commits` lists, it does not commit); a write verb anywhere → `write`; else `read`. A
 server that does not answer is not saved. The remote servers (GitHub `api.githubcopilot.com/mcp/`,
-Slack `mcp.slack.com/mcp`, Atlassian `mcp.atlassian.com/v2/mcp`) refuse an anonymous `tools/list`, so
+Slack `mcp.slack.com/mcp`, Atlassian `mcp.atlassian.com/v2/mcp`, Tavily `mcp.tavily.com/mcp/`) refuse
+an anonymous `tools/list`, so
 the form asks for a credential, discovers with it, and — for a company user — saves it as their
 connection in the same click. A background task re-checks every server every five minutes and flips
 `health` to `down` if it stops answering.

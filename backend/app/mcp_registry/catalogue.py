@@ -5,12 +5,13 @@ Every entry is the vendor's own server, reached the way the vendor documents:
     github      GitHub's remote server      https://api.githubcopilot.com/mcp/
     slack       Slack's remote server       https://mcp.slack.com/mcp
     jira        Atlassian's remote server   https://mcp.atlassian.com/v2/mcp
+    tavily      Tavily's remote server      https://mcp.tavily.com/mcp/
     filesystem  @modelcontextprotocol/server-filesystem   (npx, stdio)
     git         mcp-server-git                            (uvx, stdio)
     sqlite      mcp-server-sqlite                         (uvx, stdio)
 
 Nothing here lists a tool. Registering a quick-pick does exactly what pasting
-the address by hand does: connect, call tools/list, store the answer. The three
+the address by hand does: connect, call tools/list, store the answer. The four
 remote servers answer 401 to an anonymous tools/list, so the registry asks for
 a credential at that point and saves it as the connection in the same step.
 """
@@ -74,6 +75,17 @@ CATALOGUE: dict[str, ServerSpec] = {
         credential_hint="A scoped Atlassian API token, with API-token auth enabled by "
         "your org admin. Sent as Authorization: Bearer.",
         homepage="https://github.com/atlassian/atlassian-mcp-server",
+    ),
+    "tavily": ServerSpec(
+        name="tavily",
+        transport="http",
+        endpoint="https://mcp.tavily.com/mcp/",
+        description="Tavily's official remote MCP server: web search and page extraction "
+        "built for agents, with an answer and ranked sources rather than a link list.",
+        auth_type="api_key",
+        credential_hint="A Tavily API key (app.tavily.com → API Keys), the one that starts "
+        "tvly-. Sent as Authorization: Bearer.",
+        homepage="https://github.com/tavily-ai/tavily-mcp",
     ),
     "filesystem": ServerSpec(
         name="filesystem",

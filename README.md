@@ -139,6 +139,7 @@ What each click writes to the database, with the pgAdmin queries: [`docs/VERIFY.
 | GitHub | `https://api.githubcopilot.com/mcp/` | a personal access token — <https://github.com/settings/personal-access-tokens/new> (Issues, Pull requests, Contents) |
 | Slack | `https://mcp.slack.com/mcp` | a **user** OAuth token `xoxp-…` from <https://api.slack.com/apps> → OAuth & Permissions → User Token Scopes (`chat:write`, `channels:read`, `channels:history`, `search:read`, …) → Install. Bot tokens (`xoxb-`) are rejected. Posting needs a channel **ID** (`C0…`) the app is a member of. |
 | Jira | `https://mcp.atlassian.com/v2/mcp` | a scoped API token — <https://id.atlassian.com/manage-profile/security/api-tokens>; your org admin must enable API-token auth for the Rovo MCP server |
+| Tavily | `https://mcp.tavily.com/mcp/` | an API key `tvly-…` from <https://app.tavily.com> → API Keys. Web search and page extraction, sent as `Authorization: Bearer`. |
 
 `filesystem`, `git` and `sqlite` are the reference servers, launched over stdio inside the `api`
 container against `/srv/workspace` and `/srv/var`. No token.

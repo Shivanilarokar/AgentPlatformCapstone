@@ -112,7 +112,7 @@ during any pause and the same question is on screen.
    migration trees (platform, tenant template) and a loop over every company schema.
 3. **Joining a company by invite.** Today anyone who knows a company's name can join it as a user
    (isolation still holds; they just get a seat). An admin invite link closes that.
-4. **OAuth connections** instead of pasted tokens for GitHub, Slack and Atlassian, with refresh
+4. **OAuth connections** instead of pasted tokens for GitHub, Slack, Atlassian and Tavily, with refresh
    and revocation — the brief's own "if you finish early" item, and the one users asked for first.
 5. **Schedules and versioning.** `schedule` is already in the document but nothing runs it; add a
    scheduler and keep every version of a document so an installed agent can be rolled back.
