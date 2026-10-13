@@ -3,8 +3,8 @@
   "name": "Docs Freshness",
   "description": "Reads the handbook, finds stale sections, and writes a report file for review.",
   "model": {
-    "provider": "openai",
-    "name": "gpt-6.1-sol",
+    "provider": "google_genai",
+    "name": "gemini-flash-lite-latest",
     "temperature": 0
   },
   "topology": {

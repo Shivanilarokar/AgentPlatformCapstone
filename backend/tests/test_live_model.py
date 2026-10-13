@@ -2,7 +2,7 @@
 
     LIVE_MODEL=1 uv run pytest tests/test_live_model.py -v -s
 
-A live model call costs real tokens and real latency. A full
+Gemini's free tier allows 20 requests per day on the newest flash models. A full
 run of the two-specialist demo costs about six, so this stays off by default and
 the rest of the suite uses a fake. Run it when you want to confirm the wiring,
 and before a demo.
@@ -26,8 +26,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "tests" / "fixtures" / "docs_freshness.json"
 
 pytestmark = pytest.mark.skipif(
-    os.environ.get("LIVE_MODEL") != "1" or not settings.openai_api_key,
-    reason="set LIVE_MODEL=1 and OPENAI_API_KEY in .env to run against a real model",
+    os.environ.get("LIVE_MODEL") != "1" or not settings.google_api_key,
+    reason="set LIVE_MODEL=1 and GOOGLE_API_KEY in .env to run against a real model",
 )
 
 

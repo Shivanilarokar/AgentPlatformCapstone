@@ -21,7 +21,7 @@ from tests.conftest import ALPHA, ALPHA_ANNE
 CONFIG = {
     "schema_version": "1.0",
     "name": "Docs Freshness", "description": "reads and writes files",
-    "model": {"provider": "openai", "name": "gpt-6.1-sol", "temperature": 0},
+    "model": {"provider": "google_genai", "name": "gemini-flash-lite-latest", "temperature": 0},
     "topology": {"type": "single"},
     "tools": [
         {"ref": "filesystem.read_text_file", "risk": "read", "approval": "auto", "requires_connection": "filesystem"},

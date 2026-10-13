@@ -104,7 +104,7 @@ during any pause and the same question is on screen.
 1. **Deploy it to the cloud.** Today it is `docker compose` on a laptop. The plan: the `api` image
    as-is on a container service (Azure Container Apps / AWS ECS / Fly.io), a managed PostgreSQL 16
    with the `forge_app` role created by the same `init.sql`, the frontend built with `vite build`
-   and served as static files behind HTTPS, secrets (`OPENAI_API_KEY`, `JWT_SECRET`,
+   and served as static files behind HTTPS, secrets (`GOOGLE_API_KEY`, `JWT_SECRET`,
    `FORGE_MASTER_KEY`) from the provider's secret store instead of `.env`. Nothing in the isolation
    design changes — it is Postgres roles and RLS, not infrastructure. The stdio MCP servers would
    move to their own container or be replaced by their HTTP variants.

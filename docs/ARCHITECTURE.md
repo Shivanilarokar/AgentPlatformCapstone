@@ -39,7 +39,7 @@ it. No Python is ever generated. That single decision is why:
   "schema_version": "1.0",
   "name": "GitHub Issue Daily Summary",
   "description": "Reads open GitHub issues every morning and posts a summary to Slack.",
-  "model": { "provider": "openai", "name": "gpt-6.1-sol", "temperature": 0 },
+  "model": { "provider": "google_genai", "name": "gemini-flash-lite-latest", "temperature": 0 },
   "topology": {
     "type": "supervisor",                       // "single" | "supervisor"
     "supervisor": { "instructions": "Send the work to the collector first, then hand what it found to the poster.",
@@ -106,7 +106,7 @@ FastAPI routers  ──►  the tenant gate  (core/db.py::_point_at — SET LOCA
    ├── mcp_registry/   catalogue · mcp_client (initialize, tools/list, tools/call) · risk · registry · health
    ├── vault/          envelope (AES-256-GCM) · connections (add / use) · resolver
    ├── builder/        schema (AgentConfig) · graph (the two pauses)
-   ├── runtime/        compiler (config → LangGraph) · guarded_tool (the approval gate) · models (OpenAI)
+   ├── runtime/        compiler (config → LangGraph) · guarded_tool (the approval gate) · models (Gemini)
    ├── scoring/        score (six quality checks, five safety booleans)
    └── publishing/     sanitize (allowlist projection + scrub) · graph (admin_review pause)
                              │
@@ -405,8 +405,8 @@ and reach every screen's finished state using only the product.
 
 Code generation with sandboxing, SSO, token exchange, per-agent service accounts, canaries (the
 brief's list); LangGraph Platform (not free); Alembic migrations (schema changes are `down -v` for
-now); admin invites for joining a company; Groq/Ollama fallbacks (removed — OpenAI with a chain of
-GPT models is the one provider).
+now); admin invites for joining a company; Groq/Ollama fallbacks (removed — Gemini with a chain of
+Gemini models is the one provider).
 
 ---
 

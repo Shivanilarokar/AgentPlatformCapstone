@@ -27,7 +27,7 @@ admin's review — lets another company install it with their own credentials.
 
 ```bash
 git clone https://github.com/Shivanilarokar/AgentPlatformCapstone.git && cd AgentPlatformCapstone
-cp .env.example .env              # put your OpenAI key in OPENAI_API_KEY (https://platform.openai.com/api-keys)
+cp .env.example .env              # put your free Gemini key in GOOGLE_API_KEY (https://aistudio.google.com/apikey)
 docker compose up -d --build      # db · api · frontend · pgadmin — nothing else to install
 ```
 
@@ -218,7 +218,7 @@ psql "host=<INSTANCE_IP> dbname=forge user=postgres sslmode=require" -f deploy/b
 # five secrets, read at container start (never baked into an image)
 printf '%s' "postgresql+psycopg://forge_app:<APP_PASSWORD>@/forge?host=/cloudsql/<PROJECT>:asia-south1:forge-db" \
   | gcloud secrets create forge-database-url --data-file=-
-printf '%s' "<OPENAI_KEY>"   | gcloud secrets create forge-openai-api-key --data-file=-
+printf '%s' "<GEMINI_KEY>"   | gcloud secrets create forge-google-api-key --data-file=-
 printf '%s' "<JWT_SECRET>"   | gcloud secrets create forge-jwt-secret --data-file=-
 printf '%s' "<MASTER_KEY>"   | gcloud secrets create forge-master-key --data-file=-
 printf '%s' "<ADMIN_PASSWORD>" | gcloud secrets create forge-platform-admin-password --data-file=-
@@ -267,7 +267,7 @@ gcloud sql instances delete forge-db
 | Database | **PostgreSQL 16** | the only engine that gives schemas + roles + row-level security + JSONB + the official LangGraph checkpointer at once |
 | ORM / driver | **SQLAlchemy 2 async** + **psycopg 3** | one driver serves SQLAlchemy *and* `langgraph-checkpoint-postgres`; `SET LOCAL` scoped by `session.begin()` |
 | Agent runtime | **LangGraph 1.x** + `AsyncPostgresSaver` | `interrupt()` + a durable checkpointer *is* "the build survives a restart" and "the approval waits three days" |
-| Model | **OpenAI** via `langchain.init_chat_model` (`gpt-6.1-sol`, with a fallback chain of GPT models) | a rate limit mid-demo falls through to the next model with the same tools bound |
+| Model | **Gemini** via `langchain.init_chat_model` (`gemini-flash-lite-latest`, with a fallback chain of Gemini models) | free tier; a rate limit mid-demo falls through to the next model with the same tools bound |
 | Tools | **MCP Python SDK** | `initialize` · `tools/list` · `tools/call` over stdio / streamable HTTP / SSE — the registry asks the server, never a human |
 | Crypto | **`cryptography`** AES-256-GCM envelope | AAD `company:user:server` binds a ciphertext to its owner; the plaintext exists in one function |
 | Auth | **PyJWT** + **argon2** | the JWT carries `tenant_key`, `user_id`, `role`, so the gate needs no lookup to pick a schema; `forge_` API tokens for Postman |

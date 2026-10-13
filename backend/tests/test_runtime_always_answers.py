@@ -28,7 +28,7 @@ CONFIG = AgentConfig.model_validate({
     "schema_version": "1.0",
     "name": "P1 Bug Reader",
     "description": "Reads all P1 bugs from a GitHub repository.",
-    "model": {"provider": "openai", "name": "gpt-6.1-sol", "temperature": 0},
+    "model": {"provider": "google_genai", "name": "gemini-flash-lite-latest", "temperature": 0},
     "topology": {"type": "single",
                  "supervisor": {"instructions": "List the issues in the repository and find the P1 bugs.",
                                 "delegates_to": []},

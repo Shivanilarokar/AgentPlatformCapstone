@@ -27,7 +27,7 @@ graph TB
     SYS["<b>FORGE</b><br/>builds, runs, scores and publishes<br/>agents from configuration documents"]
 
     MCP["<b>MCP tool servers</b><br/>github · slack · jira (remote, HTTP)<br/>filesystem · git · sqlite (stdio subprocesses)"]
-    LLM["<b>OpenAI</b> via langchain init_chat_model<br/>gpt-6.1-sol, with a<br/>fallback chain of GPT models"]
+    LLM["<b>Gemini</b> via langchain init_chat_model<br/>gemini-flash-lite-latest, with a<br/>fallback chain of Gemini models"]
 
     USR -->|"browser, cookie JWT"| SYS
     CADM -->|"browser, cookie JWT"| SYS
@@ -126,7 +126,7 @@ other way to get one. Every service function takes that session as its first arg
 | Database | PostgreSQL 16 | schemas + roles + RLS + JSONB + the official LangGraph checkpointer, all at once |
 | Migrations | none yet — `metadata.create_all` per schema; `docker compose down -v` to reset | Alembic (two trees) is the known gap |
 | Agent runtime | LangGraph 1.x, `interrupt()` + `AsyncPostgresSaver` | durable pause/resume *is* checks 5 and 6 |
-| Model | `langchain.init_chat_model` → OpenAI `gpt-6.1-sol` with fallbacks `gpt-6-sol`, `gpt-5.6-sol` | a rate limit mid-demo falls through to the next model, tools bound to every link |
+| Model | `langchain.init_chat_model` → Gemini `gemini-flash-lite-latest` with fallbacks `gemini-3.1-flash-lite`, `gemini-3.5-flash` | free tier; a rate limit mid-demo falls through to the next model, tools bound to every link |
 | Tools | MCP Python SDK (`mcp>=2`) | `initialize`, `tools/list`, `tools/call` over stdio / streamable HTTP / SSE |
 | Crypto | `cryptography` AES-256-GCM envelope | AAD `company:user:server` binds a row to its owner |
 | Auth | PyJWT + argon2 | stateless claims carry `tenant_key`, `user_id`, `role` |
@@ -606,7 +606,7 @@ byte-identical for unknown, malformed and cross-company ids.
 backend/app/
   server.py                FastAPI app; lifespan: bootstrap_platform, ensure_platform_admin, health sweep
   core/
-    config.py              Settings: DATABASE_URL, OPENAI_API_KEY, JWT_SECRET, PLATFORM_ADMIN_*, FORGE_MASTER_KEY
+    config.py              Settings: DATABASE_URL, GOOGLE_API_KEY, JWT_SECRET, PLATFORM_ADMIN_*, FORGE_MASTER_KEY
     security.py            Claims, argon2, JWT, API tokens (forge_ prefix, sha256)
     db.py                  tenant_session() / platform_session() — the gate
   api/
@@ -635,7 +635,7 @@ backend/app/
   runtime/
     compiler.py            compile_agent: supervisor + specialists or single; activity events
     guarded_tool.py        redact, guarded_tool — the approval gate
-    models.py              OpenAI via init_chat_model, fallback chain, tools bound to every link
+    models.py              Gemini via init_chat_model, fallback chain, tools bound to every link
   scoring/score.py         quality_checks, safety_checks, score_agent
   publishing/
     sanitize.py            scrub, listing_from

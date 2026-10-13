@@ -36,7 +36,7 @@ backend/app/
   mcp_registry/        catalogue · mcp_client (the protocol) · risk · registry (read/write the registry) · health (the sweep)
   vault/               envelope (crypto) · connections (add / use / revoke) · resolver (what a run carries)
   builder/             schema (AgentConfig + validators) · graph (understand → … → persist)
-  runtime/             compiler (config → graph) · guarded_tool (the approval gate) · models (OpenAI)
+  runtime/             compiler (config → graph) · guarded_tool (the approval gate) · models (Gemini)
   scoring/score.py     quality + safety from rows
   publishing/          sanitize (allowlist projection) · graph (sanitize → admin_review → decide)
 backend/tests/         conftest (two throwaway companies) · graded/ (one file per graded check) · unit tests
@@ -64,8 +64,8 @@ async def lifespan(app):
     await health_sweep.stop(); await close_all(); await engine.dispose()
 ```
 
-- `core/config.py::Settings` reads `.env`: `DATABASE_URL` (as `forge_app`), `OPENAI_API_KEY`,
-  `JWT_SECRET`, `PLATFORM_ADMIN_EMAIL/PASSWORD`, `FORGE_MASTER_KEY`. `OPENAI_API_KEY` is mirrored
+- `core/config.py::Settings` reads `.env`: `DATABASE_URL` (as `forge_app`), `GOOGLE_API_KEY`,
+  `JWT_SECRET`, `PLATFORM_ADMIN_EMAIL/PASSWORD`, `FORGE_MASTER_KEY`. `GOOGLE_API_KEY` is mirrored
   into `os.environ` because `init_chat_model` reads it from there.
 - `core/db.py` creates one SQLAlchemy async engine (`psycopg` driver) and `SessionLocal`.
 - The health sweep (`health.check_everything`) walks `platform.mcp_servers` with no token (a 401

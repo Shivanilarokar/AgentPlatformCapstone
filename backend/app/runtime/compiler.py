@@ -316,7 +316,7 @@ async def compile_agent(
 
 
 def _text(message: Any) -> str:
-    """OpenAI returns content as a list of blocks; other providers return a str."""
+    """Gemini returns content as a list of blocks; other providers return a str."""
     content = getattr(message, "content", "")
     if isinstance(content, str):
         return content

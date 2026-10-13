@@ -5,8 +5,8 @@
   "description": "Triages open GitHub issues by severity and posts a morning digest to Slack.",
 
   "model": {
-    "provider": "openai",
-    "name": "gpt-6.1-sol",
+    "provider": "google_genai",
+    "name": "gemini-flash-lite-latest",
     "temperature": 0
   },
 
