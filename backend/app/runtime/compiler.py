@@ -67,11 +67,31 @@ _PLACEHOLDER = re.compile(
 )
 
 
+#: A placeholder stands in for an IDENTIFIER the user was meant to give - a
+#: repository, a channel, an id. It is never what the worker WROTE. These
+#: arguments carry written content: a Slack post, a file's body, a summary. A
+#: summary that says "owner/repo" is describing a convention, not guessing one,
+#: and blocking it stops the agent doing the job it was built for.
+_WRITTEN = frozenset({
+    "message", "text", "content", "body", "summary", "comment", "markdown",
+    "description", "title", "blocks", "note",
+})
+
+#: The backstop for a content argument this list does not name: identifiers are
+#: short, and nothing a person is asked to supply runs past a line of text.
+_IDENT_MAX = 120
+
+
 def _placeholder(args: Any, key: str = "") -> tuple[str, str] | None:
     """The first argument whose value is a placeholder rather than something the
     user gave, as (name, value); None when every value looks real."""
     if isinstance(args, str):
-        return (key, args) if _PLACEHOLDER.search(args.strip()) else None
+        if key.lower() in _WRITTEN:
+            return None
+        value = args.strip()
+        if len(value) > _IDENT_MAX:
+            return None
+        return (key, args) if _PLACEHOLDER.search(value) else None
     items = args.items() if isinstance(args, dict) else enumerate(args) if isinstance(args, list) else ()
     for k, v in items:
         if hit := _placeholder(v, str(k)):

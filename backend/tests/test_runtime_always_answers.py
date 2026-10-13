@@ -138,6 +138,25 @@ def test_placeholder_values_are_recognised(args, is_placeholder):
     assert (_placeholder(args) is not None) is is_placeholder
 
 
+@pytest.mark.parametrize("args", [
+    # A summary the worker WROTE. It names the owner/repo convention, mentions an
+    # example org - and must still be posted. Blocking these stopped a working
+    # agent from ever delivering its Slack message.
+    {"channel": "#general", "message": "*Top 5 repos*\n1. acme/thing\nids are owner/repo"},
+    {"channel": "C0123", "text": "Summary: my-org/my-repo is the convention"},
+    {"path": "notes.md", "content": "see the example org page"},
+    # not on the list, but far too long to be an identifier
+    {"payload": "x " * 200 + "owner/repo"},
+])
+def test_what_the_worker_wrote_is_never_a_placeholder(args):
+    assert _placeholder(args) is None
+
+
+def test_an_invented_identifier_beside_real_content_is_still_caught():
+    """The content is waved through; the channel it would be sent to is not."""
+    assert _placeholder({"channel": "owner/repo", "message": "hello team"}) is not None
+
+
 def test_the_instruction_names_the_format_to_ask_for():
     # It must say to name the value and its shape - but NOT hand the model one
     # ready-made sentence. It used to end with "For a repository say: 'Please
