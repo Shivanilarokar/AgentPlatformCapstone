@@ -77,7 +77,7 @@ SECRET_SHAPES = [
 
 
 class ModelSpec(BaseModel):
-    provider: str = Field(description="google_genai")
+    provider: str = Field(description="openai")
     name: str
     temperature: float = 0.0
 

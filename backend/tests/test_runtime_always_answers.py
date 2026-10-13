@@ -28,7 +28,7 @@ CONFIG = AgentConfig.model_validate({
     "schema_version": "1.0",
     "name": "P1 Bug Reader",
     "description": "Reads all P1 bugs from a GitHub repository.",
-    "model": {"provider": "google_genai", "name": "gemini-flash-lite-latest", "temperature": 0},
+    "model": {"provider": "openai", "name": "gpt-6.1-sol", "temperature": 0},
     "topology": {"type": "single",
                  "supervisor": {"instructions": "List the issues in the repository and find the P1 bugs.",
                                 "delegates_to": []},
@@ -139,8 +139,20 @@ def test_placeholder_values_are_recognised(args, is_placeholder):
 
 
 def test_the_instruction_names_the_format_to_ask_for():
-    assert "Please provide the repository name in owner/repo format." in NO_GUESSING
+    # It must say to name the value and its shape - but NOT hand the model one
+    # ready-made sentence. It used to end with "For a repository say: 'Please
+    # provide the repository name in owner/repo format.'", and workers recited
+    # that line instead of calling a search tool that needed no repository.
+    assert "naming exactly which value you need and the form it takes" in NO_GUESSING
+    assert "Please provide the repository name" not in NO_GUESSING
     assert "my-org/my-repo" in NO_GUESSING            # named as something NOT to use
+
+
+def test_an_argument_the_worker_can_write_itself_is_not_a_missing_value():
+    """A search query, a summary, a message body: writable from the task, so the
+    worker must write one and call the tool rather than asking for it."""
+    assert "search query" in NO_GUESSING
+    assert "is NOT missing" in NO_GUESSING
 
 
 async def test_a_placeholder_call_is_stopped_and_the_model_gets_to_ask(monkeypatch):

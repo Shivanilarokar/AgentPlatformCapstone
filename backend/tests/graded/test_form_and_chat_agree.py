@@ -85,7 +85,7 @@ def test_a_config_from_either_path_validates():
     cfg = AgentConfig.model_validate({
         "schema_version": "1.0",
         "name": "X", "description": "Y",
-        "model": {"provider": "google_genai", "name": "m", "temperature": 0},
+        "model": {"provider": "openai", "name": "m", "temperature": 0},
         "topology": {"type": "single", "supervisor": None, "specialists": []},
         "tools": [{"ref": "a.write_thing", "risk": "write", "approval": "ask",
                    "requires_connection": "a"}],

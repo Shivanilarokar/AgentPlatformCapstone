@@ -7,7 +7,7 @@ Also covers the two rules the runtime is responsible for:
   rule 3  the credential never reaches graph state, which the checkpointer
           writes to disk (this is where most teams lose graded check 2)
 
-THE MODEL IS FAKED HERE, DELIBERATELY. Gemini's free tier allows 20 requests a
+THE MODEL IS FAKED HERE, DELIBERATELY. A model account has a per-minute ceiling, and a
 day and one real run costs about six, so a suite that called it would be both
 flaky and self-limiting. Everything else is real: the graph, the delegation, the
 MCP protocol, the interrupt, the credential handling. See

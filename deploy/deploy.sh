@@ -32,7 +32,7 @@ IMAGE_BASE="${REGION}-docker.pkg.dev/${PROJECT}/${REPO}"
 
 # Secret Manager names -> the environment variables the app reads.
 SECRETS="DATABASE_URL=forge-database-url:latest,\
-GOOGLE_API_KEY=forge-google-api-key:latest,\
+OPENAI_API_KEY=forge-openai-api-key:latest,\
 JWT_SECRET=forge-jwt-secret:latest,\
 FORGE_MASTER_KEY=forge-master-key:latest,\
 PLATFORM_ADMIN_PASSWORD=forge-platform-admin-password:latest"

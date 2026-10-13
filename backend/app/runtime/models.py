@@ -6,9 +6,9 @@ company's workspace, where a different provider may be configured.
 
 DEMO-DAY INSURANCE
 ------------------
-Free tiers are small. Gemini's free tier allows **20 requests per day** on the
-newest flash models, and one run of a two-specialist agent costs about six. A
-rate limit during a live 45-minute presentation is not a hypothetical.
+A rate limit during a live 45-minute presentation is not a hypothetical: one run
+of a two-specialist agent costs about six requests, and an account that has been
+exercised all morning can hit its per-minute ceiling.
 
 So every model returned here is wrapped in a fallback chain: if the first model
 returns 429, LangChain transparently retries the same request on the next one.
@@ -28,20 +28,21 @@ from app.core.config import settings
 
 log = logging.getLogger(__name__)
 
-#: The one provider this platform runs on. Its key comes from .env (GOOGLE_API_KEY).
-PROVIDER = "google_genai"
+#: The one provider this platform runs on. Its key comes from .env (OPENAI_API_KEY).
+PROVIDER = "openai"
 
 #: Tried in order when the configuration's own model is unavailable or rate-limited.
-#: Lite models first - they carry a far larger free-tier daily quota.
+#: Newest first, then one generation back - a 429 on the newest is the common case,
+#: and the older models answer the same prompts with the same tool-calling shape.
 FALLBACKS: list[tuple[str, str]] = [
-    (PROVIDER, "gemini-flash-lite-latest"),
-    (PROVIDER, "gemini-3.1-flash-lite"),
-    (PROVIDER, "gemini-3.5-flash"),
+    (PROVIDER, "gpt-6.1-sol"),
+    (PROVIDER, "gpt-6-sol"),
+    (PROVIDER, "gpt-5.6-sol"),
 ]
 
 
 def _build(provider: str, name: str, temperature: float) -> BaseChatModel | None:
-    if provider != PROVIDER or not settings.google_api_key:
+    if provider != PROVIDER or not settings.openai_api_key:
         return None
     try:
         return init_chat_model(name, model_provider=provider, temperature=temperature)
@@ -69,7 +70,7 @@ def model_chain(spec: ModelSpec) -> list[BaseChatModel]:
             chain.append(model)
 
     if not chain:
-        raise RuntimeError("no usable model: put GOOGLE_API_KEY in .env")
+        raise RuntimeError("no usable model: put OPENAI_API_KEY in .env")
     return chain
 
 

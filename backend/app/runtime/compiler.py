@@ -45,13 +45,15 @@ MAX_TOOL_ROUNDS = 6  # per specialist, so a confused model cannot loop forever
 #: person's message. A model that is not told to ask will invent one - and a
 #: GitHub search of an invented repository returns somebody else's issues.
 NO_GUESSING = (
-    "If a tool needs a value you were not given - a repository, a channel, an address, a file path, "
-    "an ID - do NOT guess or make one up, and never use a placeholder such as my-org/my-repo, "
-    "owner/repo, example or <name>. Use what the user's task says; if it does not say, call no tool "
-    "and reply asking for exactly that value, in the form it needs. For a repository say: "
-    "'Please provide the repository name in owner/repo format.' A value the user gave earlier in the "
-    "conversation counts as given. Never say that something could not be found when you were never "
-    "given a real value for it."
+    "Use the tools you were given. Before deciding a value is missing, look at what the tool "
+    "actually requires: an argument you can write yourself from the user's task - a search query, "
+    "a summary, a message body, a sort order, a date range - is NOT missing. Write it and call the "
+    "tool. Only a value that NAMES something specific you were never told - a repository, a "
+    "channel, an address, a file path, an ID - can be missing. do NOT guess one, and never use a "
+    "placeholder such as my-org/my-repo, owner/repo, example or <name>. When such a value really is "
+    "missing, call no tool and reply naming exactly which value you need and the form it takes. A "
+    "value the user gave earlier in the conversation counts as given. Never say that something "
+    "could not be found when you were never given a real value for it."
 )
 
 #: What a model writes when it has no real value and fills the gap anyway:
@@ -294,7 +296,7 @@ async def compile_agent(
 
 
 def _text(message: Any) -> str:
-    """Gemini returns content as a list of blocks; other providers return a str."""
+    """OpenAI returns content as a list of blocks; other providers return a str."""
     content = getattr(message, "content", "")
     if isinstance(content, str):
         return content

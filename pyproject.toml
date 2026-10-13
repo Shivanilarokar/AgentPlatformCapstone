@@ -20,7 +20,7 @@ dependencies = [
     # --- tools ---
     "mcp>=2.0",
     # --- model providers ---
-    "langchain-google-genai>=2.0",
+    "langchain-openai>=0.2",
 ]
 
 [project.optional-dependencies]
