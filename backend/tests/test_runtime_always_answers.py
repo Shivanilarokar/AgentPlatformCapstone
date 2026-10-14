@@ -138,9 +138,40 @@ def test_placeholder_values_are_recognised(args, is_placeholder):
     assert (_placeholder(args) is not None) is is_placeholder
 
 
+@pytest.mark.parametrize("args", [
+    # A summary the worker WROTE. It names the owner/repo convention, mentions an
+    # example org - and must still be posted. Blocking these stopped a working
+    # agent from ever delivering its Slack message.
+    {"channel": "#general", "message": "*Top 5 repos*\n1. acme/thing\nids are owner/repo"},
+    {"channel": "C0123", "text": "Summary: my-org/my-repo is the convention"},
+    {"path": "notes.md", "content": "see the example org page"},
+    # not on the list, but far too long to be an identifier
+    {"payload": "x " * 200 + "owner/repo"},
+])
+def test_what_the_worker_wrote_is_never_a_placeholder(args):
+    assert _placeholder(args) is None
+
+
+def test_an_invented_identifier_beside_real_content_is_still_caught():
+    """The content is waved through; the channel it would be sent to is not."""
+    assert _placeholder({"channel": "owner/repo", "message": "hello team"}) is not None
+
+
 def test_the_instruction_names_the_format_to_ask_for():
-    assert "Please provide the repository name in owner/repo format." in NO_GUESSING
+    # It must say to name the value and its shape - but NOT hand the model one
+    # ready-made sentence. It used to end with "For a repository say: 'Please
+    # provide the repository name in owner/repo format.'", and workers recited
+    # that line instead of calling a search tool that needed no repository.
+    assert "naming exactly which value you need and the form it takes" in NO_GUESSING
+    assert "Please provide the repository name" not in NO_GUESSING
     assert "my-org/my-repo" in NO_GUESSING            # named as something NOT to use
+
+
+def test_an_argument_the_worker_can_write_itself_is_not_a_missing_value():
+    """A search query, a summary, a message body: writable from the task, so the
+    worker must write one and call the tool rather than asking for it."""
+    assert "search query" in NO_GUESSING
+    assert "is NOT missing" in NO_GUESSING
 
 
 async def test_a_placeholder_call_is_stopped_and_the_model_gets_to_ask(monkeypatch):

@@ -45,13 +45,15 @@ MAX_TOOL_ROUNDS = 6  # per specialist, so a confused model cannot loop forever
 #: person's message. A model that is not told to ask will invent one - and a
 #: GitHub search of an invented repository returns somebody else's issues.
 NO_GUESSING = (
-    "If a tool needs a value you were not given - a repository, a channel, an address, a file path, "
-    "an ID - do NOT guess or make one up, and never use a placeholder such as my-org/my-repo, "
-    "owner/repo, example or <name>. Use what the user's task says; if it does not say, call no tool "
-    "and reply asking for exactly that value, in the form it needs. For a repository say: "
-    "'Please provide the repository name in owner/repo format.' A value the user gave earlier in the "
-    "conversation counts as given. Never say that something could not be found when you were never "
-    "given a real value for it."
+    "Use the tools you were given. Before deciding a value is missing, look at what the tool "
+    "actually requires: an argument you can write yourself from the user's task - a search query, "
+    "a summary, a message body, a sort order, a date range - is NOT missing. Write it and call the "
+    "tool. Only a value that NAMES something specific you were never told - a repository, a "
+    "channel, an address, a file path, an ID - can be missing. do NOT guess one, and never use a "
+    "placeholder such as my-org/my-repo, owner/repo, example or <name>. When such a value really is "
+    "missing, call no tool and reply naming exactly which value you need and the form it takes. A "
+    "value the user gave earlier in the conversation counts as given. Never say that something "
+    "could not be found when you were never given a real value for it."
 )
 
 #: What a model writes when it has no real value and fills the gap anyway:
@@ -65,11 +67,31 @@ _PLACEHOLDER = re.compile(
 )
 
 
+#: A placeholder stands in for an IDENTIFIER the user was meant to give - a
+#: repository, a channel, an id. It is never what the worker WROTE. These
+#: arguments carry written content: a Slack post, a file's body, a summary. A
+#: summary that says "owner/repo" is describing a convention, not guessing one,
+#: and blocking it stops the agent doing the job it was built for.
+_WRITTEN = frozenset({
+    "message", "text", "content", "body", "summary", "comment", "markdown",
+    "description", "title", "blocks", "note",
+})
+
+#: The backstop for a content argument this list does not name: identifiers are
+#: short, and nothing a person is asked to supply runs past a line of text.
+_IDENT_MAX = 120
+
+
 def _placeholder(args: Any, key: str = "") -> tuple[str, str] | None:
     """The first argument whose value is a placeholder rather than something the
     user gave, as (name, value); None when every value looks real."""
     if isinstance(args, str):
-        return (key, args) if _PLACEHOLDER.search(args.strip()) else None
+        if key.lower() in _WRITTEN:
+            return None
+        value = args.strip()
+        if len(value) > _IDENT_MAX:
+            return None
+        return (key, args) if _PLACEHOLDER.search(value) else None
     items = args.items() if isinstance(args, dict) else enumerate(args) if isinstance(args, list) else ()
     for k, v in items:
         if hit := _placeholder(v, str(k)):
