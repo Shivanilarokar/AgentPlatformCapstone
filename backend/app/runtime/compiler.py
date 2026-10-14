@@ -302,7 +302,13 @@ def _text(message: Any) -> str:
 
 
 def _context(state: RunState) -> str:
-    return "\n".join(f"{k}: {_clip(v, 400)}" for k, v in state["results"].items())
+    """What earlier steps found, for the next worker. A worker's summary is its
+    hand-off and goes over whole - clipped, the poster posted 400 characters of
+    a five-repository report to Slack. Raw tool output stays clipped: the
+    summary already says what mattered in it, and a web search runs to pages."""
+    return "\n".join(
+        f"{k}: {v if k.endswith('.summary') else _clip(v, 400)}" for k, v in state["results"].items()
+    )
 
 
 def _clip(text: str, limit: int = 90) -> str:
