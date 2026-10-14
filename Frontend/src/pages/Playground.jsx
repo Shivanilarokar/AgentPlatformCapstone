@@ -7,7 +7,7 @@
  * browser only ever held a run id.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { ago, get, post, stream } from "../api";
@@ -40,6 +40,35 @@ function Line({ text }) {
     );
   }
   return <p><Badge>{who}</Badge> {rest}</p>;
+}
+
+/* One exchange in the chat: what was asked, every step, and how it ended. */
+
+const FINISHED = ["ok", "rejected", "error"];
+
+function Asked({ r }) {
+  return <div className="msg user"><div className="body">{r.input}</div></div>;
+}
+
+function Steps({ r }) {
+  if (!r.transcript.length) return null;
+  return (
+    <div className="msg bot">
+      <div className="who-av">F</div>
+      <div className="body">{r.transcript.map((t, i) => <Line key={i} text={t} />)}</div>
+    </div>
+  );
+}
+
+function Answer({ r }) {
+  if (!FINISHED.includes(r.status)) return null;
+  return (
+    <div className="msg bot"><div className="who-av">F</div>
+      <div className="body">
+        {r.status === "error" ? <p className="muted">The run failed: <code>{r.output}</code></p>
+          : <p style={{ whiteSpace: "pre-wrap" }}>{r.output}</p>}
+      </div></div>
+  );
 }
 
 function Approval({ run, onDecide, busy }) {
@@ -151,6 +180,10 @@ export function PlaygroundTab({ agent }) {
   // run starts from nothing, so without this a reply to "which repository?" would
   // arrive as a task of its own and the agent would ask again.
   const [turns, setTurns] = useState([]);
+  // The same conversation as it was SHOWN: the finished runs before the current
+  // one. Each message is a new run, so drawing only `current` wiped the chat
+  // every time you answered the agent's question.
+  const [earlier, setEarlier] = useState([]);
   const [live, setLive] = useState([]);        // activity events for the run in progress
   const [now, setNow] = useState(null);        // the latest activity, shown under the composer
   const [score, setScore] = useState(null);
@@ -211,11 +244,14 @@ export function PlaygroundTab({ agent }) {
     }
     setGate(null);
     setInput("");
+    // Only a run this conversation remembers stays on screen: one left over from
+    // before a reload or "Start a new chat" is not part of what the agent is told.
+    if (current && turns.length && FINISHED.includes(current.status)) setEarlier((e) => [...e, current]);
     await drive({ input: text, history: turns }, { id: "pending", input: text, status: "running", transcript: [], pending: null, output: "" });
   }
 
   function newChat() {
-    setTurns([]); setCurrent(null); setGate(null); setError(null); setInput("");
+    setTurns([]); setEarlier([]); setCurrent(null); setGate(null); setError(null); setInput("");
   }
 
   async function decide(decision) {
@@ -243,14 +279,10 @@ export function PlaygroundTab({ agent }) {
             </div>
           )}
 
-          {r && <div className="msg user"><div className="body">{r.input}</div></div>}
+          {earlier.map((e) => <Fragment key={e.id}><Asked r={e} /><Steps r={e} /><Answer r={e} /></Fragment>)}
 
-          {r && r.transcript.length > 0 && (
-            <div className="msg bot">
-              <div className="who-av">F</div>
-              <div className="body">{r.transcript.map((t, i) => <Line key={i} text={t} />)}</div>
-            </div>
-          )}
+          {r && <Asked r={r} />}
+          {r && <Steps r={r} />}
 
           {r && r.status === "running" && (
             <div className="msg bot"><div className="who-av">F</div>
@@ -268,13 +300,7 @@ export function PlaygroundTab({ agent }) {
               </div></div>
           )}
 
-          {r && (r.status === "ok" || r.status === "rejected" || r.status === "error") && (
-            <div className="msg bot"><div className="who-av">F</div>
-              <div className="body">
-                {r.status === "error" ? <p className="muted">The run failed: <code>{r.output}</code></p>
-                  : <p style={{ whiteSpace: "pre-wrap" }}>{r.output}</p>}
-              </div></div>
-          )}
+          {r && <Answer r={r} />}
 
           {gate && (
             <div className="msg bot"><div className="who-av">F</div>
