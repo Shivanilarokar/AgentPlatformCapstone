@@ -45,12 +45,13 @@ from app.builder.schema import (
 from app.core.db import tenant_session
 from app.models.tenant import Agent, Connection
 from app.mcp_registry import registry
+from app.mcp_registry.catalogue import CATALOGUE
 from app.mcp_registry.risk import classify_risk
 from app.runtime.models import chat_model
 
 log = logging.getLogger(__name__)
 
-DESIGN_RULES = "You design agents for a platform. Given a request and the tools this workspace actually has, choose the SMALLEST set of tools that does the job - usually 1 to 3. Rules:\n- Use ONLY refs from the list, exactly as written.\n- Never include a tool for something the request did not ask for. 'Summarise issues' needs a list tool, not a create tool.\n- Prefer the most specific tool: read_text_file over read_file or read_media_file; list_issues over search_issues for 'my open issues'.\n- Include a write tool only if the request asks for something to be created, written, sent or posted.\n- If the job has distinct phases (gather, then act), split it into 2-3 specialists, each with only the tools for its phase, and write how the coordinator sequences them. A job that both READS (list, get, search) and then WRITES (send, post, create) is ALWAYS split: one specialist gathers, another acts, so the one that writes holds nothing else. A single-phase job gets no specialists and plain instructions instead.\n- Instructions are what the agent will be told at run time: concrete, second person, no tool names.\n- If the request needs something NO listed tool can do (e.g. posting to Slack when there is no slack tool), do not substitute another tool for it. Put it under `unmet` - the kind of server it would need (one lowercase word such as slack, github, jira) and what it was for - and design the rest without it.\n- FIRST fill `needs`: every distinct thing the request asks the agent to DO, one verb each ('list open issues' and 'delete issues' are two needs), each with the exact ref of the tool that does THAT thing. If NO tool in the list can do it, set tool_ref to null. Never substitute a tool that does something different (a list tool cannot delete; a create tool cannot delete), and never write instructions or a specialist that promise something no listed tool can do. If an action is missing because a whole KIND of server is not registered (no slack tool at all), also report it under `unmet` as above and design the rest without it. If a server you DO have simply has no tool for the action, the agent must not be built."
+DESIGN_RULES = "You design agents for a platform. Given a request and the tools this workspace actually has, choose the SMALLEST set of tools that does the job - usually 1 to 3. Rules:\n- Use ONLY refs from the list, exactly as written.\n- Never include a tool for something the request did not ask for. 'Summarise issues' needs a list tool, not a create tool.\n- Prefer the most specific tool: read_text_file over read_file or read_media_file; list_issues over search_issues for 'my open issues'.\n- Include a write tool only if the request asks for something to be created, written, sent or posted.\n- If the job has distinct phases (gather, then act), split it into 2-3 specialists, each with only the tools for its phase, and write how the coordinator sequences them. A job that both READS (list, get, search) and then WRITES (send, post, create) is ALWAYS split: one specialist gathers, another acts, so the one that writes holds nothing else. A single-phase job gets no specialists and plain instructions instead.\n- Instructions are what the agent will be told at run time: concrete, second person, no tool names.\n- A tool only counts if it works on the source the request names. 'From the web', 'online', 'on the internet' and 'news' mean a web search; a GitHub, Jira or Slack search is not a web search, so never substitute one for it.\n- If the request needs something NO listed tool can do (e.g. posting to Slack when there is no slack tool), do not substitute another tool for it. Put it under `unmet` - the kind of server it would need and what it was for - and design the rest without it. If a server in the 'could register' list does it, use exactly that name (tavily for a web search); otherwise one lowercase word such as slack, github, jira.\n- FIRST fill `needs`: every distinct thing the request asks the agent to DO, one verb each ('list open issues' and 'delete issues' are two needs), each with the exact ref of the tool that does THAT thing. If NO tool in the list can do it, set tool_ref to null, and if that is because the right server is not registered, put its name in missing_server. Never substitute a tool that does something different (a list tool cannot delete; a create tool cannot delete), and never write instructions or a specialist that promise something no listed tool can do. If an action is missing because a whole KIND of server is not registered (no slack tool at all), also report it under `unmet` as above and design the rest without it. If a server you DO have simply has no tool for the action, the agent must not be built."
 
 DEFAULT_MODEL = ModelSpec(provider="google_genai", name="gemini-flash-lite-latest", temperature=0)
 
@@ -116,6 +117,11 @@ class Need(BaseModel):
         default=None,
         description="The exact 'server.tool' from the list that does THIS action, or null when NO tool "
         "in the list can do it. Never pick a tool that does something else.",
+    )
+    missing_server: str | None = Field(
+        default=None,
+        description="Only when tool_ref is null because the server that would do it is not "
+        "registered: that server's name, from the 'could register' list if one fits (e.g. 'tavily').",
     )
 
 
@@ -187,23 +193,32 @@ async def understand(state: BuildState) -> dict:
             "log": ["No tool servers registered yet - register one first."],
         }
 
+    have = {c["server"] for c in catalogue}
     listing = "\n".join(f"  {c['ref']} ({c['risk']}) - {c['description']}" for c in catalogue)
+    # The quick-picks this person has not registered. Without them the model can
+    # only reach for what is here - github's repo search for "from the web" -
+    # and never says a web search server is one click away.
+    addable = "\n".join(f"  {s.name} - {s.description}" for s in CATALOGUE.values() if s.name not in have)
+    message = f"Request:\n{state['prompt']}\n\nTools available:\n{listing}"
+    if addable:
+        message += f"\n\nNot registered here, but the user could register in one click:\n{addable}"
 
     llm = chat_model(DEFAULT_MODEL).with_structured_output(Draft)
-    draft: Draft = await llm.ainvoke(
-        [
-            SystemMessage(DESIGN_RULES),
-            HumanMessage(f"Request:\n{state['prompt']}\n\nTools available:\n{listing}"),
-        ]
-    )
+    draft: Draft = await llm.ainvoke([SystemMessage(DESIGN_RULES), HumanMessage(message)])
 
     # Can this be built AT ALL? If the request needs something no tool here can
     # do, say so and build nothing. Going on would save an agent whose
     # instructions promise what it cannot deliver - the model's own "reasoning"
     # often admits the gap in one sentence while the design ignores it.
-    have = {c["server"] for c in catalogue}
-    unmet = [{"need": _ident(u.need), "why": u.why} for u in draft.unmet if _ident(u.need) not in have]
-    gaps = [g for g in unmet_needs(draft.needs, catalogue) if not _explained_by(g, unmet)]
+    open_actions = unmet_needs(draft.needs, catalogue)
+    named = [{"need": _ident(u.need), "why": u.why} for u in draft.unmet]
+    # A need pinned to a server this workspace lacks explains its own gap, even
+    # when its words never mention the server ("search the web" -> tavily).
+    named += [{"need": _ident(n.missing_server), "why": n.action.strip()} for n in draft.needs
+              if n.missing_server and n.action.strip() in open_actions]
+    named = [u for u in named if u["need"] not in have]
+    gaps = [g for g in open_actions if not _explained_by(g, named)]
+    unmet = [u for i, u in enumerate(named) if u["need"] not in {v["need"] for v in named[:i]}]
     if gaps:
         return {
             "catalogue": catalogue,

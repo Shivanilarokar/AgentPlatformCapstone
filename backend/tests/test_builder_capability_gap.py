@@ -18,7 +18,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import func, select
 
 from app.api.routers.builds import _shape
-from app.builder.graph import Draft, Need, SpecialistDraft, build_graph, unmet_needs
+from app.builder.graph import Draft, Need, SpecialistDraft, UnmetNeed, build_graph, unmet_needs
 from app.builder.schema import Risk
 from app.core.db import tenant_session
 from app.mcp_registry import registry
@@ -72,11 +72,13 @@ class StubModel:
 
     def __init__(self, draft: Draft):
         self.draft = draft
+        self.seen = []
 
     def with_structured_output(self, _schema):
         return self
 
-    async def ainvoke(self, _messages):
+    async def ainvoke(self, messages):
+        self.seen = messages
         return self.draft
 
 
@@ -93,8 +95,10 @@ async def workspace(two_workspaces, monkeypatch):
         await registry.register(s, name=NAME, transport="stdio", endpoint="echo hi")
 
 
-def use_model(monkeypatch, draft: Draft):
-    monkeypatch.setattr("app.builder.graph.chat_model", lambda _spec: StubModel(draft))
+def use_model(monkeypatch, draft: Draft) -> StubModel:
+    stub = StubModel(draft)
+    monkeypatch.setattr("app.builder.graph.chat_model", lambda _spec: stub)
+    return stub
 
 
 async def run_build(prompt="list and delete all open issues"):
@@ -170,3 +174,62 @@ async def test_an_admin_switched_off_tool_is_named_as_a_possible_reason(workspac
     use_model(monkeypatch, design(need("create an issue", None)))
     result = await run_build("create an issue")
     assert "switched off by your admin" in result["log"][0]
+
+
+# ------------------------------------- a server that is a quick-pick away, not missing
+
+# Found in use: "read the top 5 git repos from the web and report on Slack" in a
+# workspace with github and slack but no tavily. The model only ever saw the
+# registered tools, so it used github.search_repositories for "from the web" and
+# never said a web search server was one click away.
+
+
+def could_register(stub: StubModel) -> list[str]:
+    """The server names the model was told it could ask the user to register."""
+    text = stub.seen[-1].content
+    if "could register" not in text:
+        return []
+    block = text.split("could register", 1)[1].split("\n\n", 1)[0]
+    return [line.split(" - ", 1)[0].strip() for line in block.splitlines()[1:] if line.strip()]
+
+
+async def test_the_model_is_told_which_quick_picks_are_not_registered(workspace, monkeypatch):
+    async def discover(_ep, _token):
+        return [DiscoveredTool("search_repositories", "search", {}, Risk.READ)]
+
+    monkeypatch.setattr(registry, "discover", discover)
+    async with tenant_session(A, ANNE) as s:
+        await registry.register(s, name="github", transport="stdio", endpoint="echo hi")
+
+    stub = use_model(monkeypatch, Draft(name="Issue Lister", description="d", reasoning="r",
+                                        needs=[need("list open issues", LIST)], tool_refs=[LIST]))
+    await run_build("list all open issues")
+
+    names = could_register(stub)
+    assert "tavily" in names and "slack" in names
+    assert "github" not in names                  # already here: it is in the tool list instead
+
+
+async def test_a_need_for_an_unregistered_server_asks_to_register_it(workspace, monkeypatch):
+    """The words of the action need not mention the server: the need names it."""
+    web = "search the web for the top 5 git repositories"
+    use_model(monkeypatch, Draft(
+        name="Git Repository Reporter", description="d", reasoning="r",
+        needs=[Need(action=web, tool_ref=None, missing_server="tavily"),
+               need("create an issue with the report", CREATE)],
+        tool_refs=[CREATE], instructions="File the report as an issue.",
+        unmet=[UnmetNeed(need="tavily", why="web search")],
+    ))
+    result = await run_build("read the top 5 git repos from the web and file a report as an issue")
+
+    (pause,) = result["__interrupt__"]           # the register-or-build-without pause, not "can't build"
+    assert pause.value["type"] == "select_tools"
+    assert pause.value["unmet"] == [{"need": "tavily", "why": "web search"}]   # once, not twice
+    assert pause.value["suggested"] == [CREATE]
+    assert await agent_count() == 0
+
+
+async def test_naming_a_server_you_already_have_does_not_excuse_a_gap(workspace, monkeypatch):
+    use_model(monkeypatch, design(Need(action="delete issues", tool_ref=None, missing_server=NAME)))
+    result = await run_build()
+    assert "__interrupt__" not in result and "can't build" in result["log"][0]
